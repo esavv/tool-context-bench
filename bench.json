@@ -1,0 +1,15 @@
+{
+  "repository": "esavv/agent-test",
+  "branch": "main",
+  "opencodeVersion": "1.18.30",
+  "model": "openai/gpt-5.6-terra",
+  "claudeVersion": "2.1.267",
+  "claudeModel": "claude-sonnet-5",
+  "codexVersion": "0.153.3",
+  "codexModel": "gpt-5.6-terra",
+  "variant": "medium",
+  "repeats": 3,
+  "timeoutSeconds": 180,
+  "maxSteps": 8,
+  "keychainService": "tool-context-bench.github"
+}

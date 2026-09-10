@@ -1,0 +1,46 @@
+import { readFile } from "node:fs/promises";
+import { homedir, userInfo } from "node:os";
+import { resolve, join } from "node:path";
+import { z } from "zod";
+
+export const configSchema = z.strictObject({
+  repository: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
+  branch: z
+    .string()
+    .min(1)
+    .regex(/^[\w./-]+$/),
+  opencodeVersion: z.literal("1.18.30"),
+  model: z.literal("openai/gpt-5.6-terra"),
+  claudeVersion: z.literal("2.1.267").default("2.1.267"),
+  claudeModel: z.literal("claude-sonnet-5").default("claude-sonnet-5"),
+  codexVersion: z.literal("0.153.3").default("0.153.3"),
+  codexModel: z.literal("gpt-5.6-terra").default("gpt-5.6-terra"),
+  variant: z.enum(["low", "medium", "high"]).default("medium"),
+  repeats: z.number().int().min(1).max(10).default(3),
+  timeoutSeconds: z.number().int().min(10).max(600).default(180),
+  maxSteps: z.number().int().min(2).max(20).default(8),
+  keychainService: z.literal("tool-context-bench.github").default("tool-context-bench.github"),
+});
+export type Config = z.infer<typeof configSchema>;
+
+export async function loadConfig(path: string): Promise<Config> {
+  const value: unknown = JSON.parse(await readFile(path, "utf8"));
+  return configSchema.parse(value);
+}
+
+export function runtimePaths(root = join(homedir(), "Benchmarks", "tool-context-bench")) {
+  return {
+    root: resolve(root),
+    attempts: resolve(root, "attempts"),
+    results: resolve(root, "results"),
+    marker: resolve(root, "ownership.json"),
+    lock: resolve(root, "run.lock"),
+    account: userInfo().username,
+    auth: join(
+      process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
+      "opencode",
+      "auth.json",
+    ),
+  };
+}
+export type Paths = ReturnType<typeof runtimePaths>;

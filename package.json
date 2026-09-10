@@ -1,0 +1,40 @@
+{
+  "name": "tool-context-bench",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "tcb": "dist/cli.js"
+  },
+  "type": "module",
+  "scripts": {
+    "tcb": "tsx src/cli.ts",
+    "build": "tsc",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "oxlint src tests",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "check": "npm run typecheck && npm test && npm run lint && npm run format:check && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "commander": "14.0.3",
+    "ink": "6.8.0",
+    "react": "19.2.4",
+    "shell-quote": "1.10.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.0",
+    "@types/react": "19.2.14",
+    "@types/shell-quote": "1.7.5",
+    "oxfmt": "0.46.0",
+    "oxlint": "1.61.0",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  }
+}

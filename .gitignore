@@ -1,0 +1,13 @@
+/.local/
+node_modules/
+dist/
+coverage/
+*PLAN.md
+manual-github-mcp-tests.txt
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+*.log
+.DS_Store
