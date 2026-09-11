@@ -225,6 +225,58 @@ it("requires synthetic ChatGPT file auth and generates private, pinned direct-to
   );
 });
 
+it("does not configure MCP servers for suite Bash", async () => {
+  const suiteConfig = configSchema.parse({
+    ...config,
+    suite: {
+      cliVersions: { supabase: "2.117.0", wrangler: "4.131.1", stripe: "1.50.11" },
+      supabase: {
+        projectRef: "abcdefghijklmnopqrst",
+        edgeFunctionId: "11111111-1111-4111-8111-111111111111",
+        edgeFunctionSlug: "hello-world",
+        keychainService: "tool-context-bench.supabase",
+      },
+      cloudflare: {
+        accountId: "a".repeat(32),
+        d1DatabaseId: "22222222-2222-4222-8222-222222222222",
+        d1DatabaseName: "agent-test",
+        keychainService: "tool-context-bench.cloudflare",
+      },
+      stripe: {
+        webhookEndpointId: "we_fixture",
+        livemode: false,
+        keychainService: "tool-context-bench.stripe",
+      },
+    },
+  });
+  const credentials = {
+    github: "synthetic-github",
+    supabase: "synthetic-supabase",
+    cloudflare: "synthetic-cloudflare",
+    stripe: "synthetic-stripe",
+  };
+  const prepared = await prepareCodex(
+    join(root, "suite-bash"),
+    suiteConfig,
+    {
+      id: "codex-bash-noop-1",
+      agent: "codex",
+      technique: "bash",
+      workload: "noop",
+      repetition: 1,
+    },
+    undefined,
+    credentials.github,
+    "suite",
+    credentials,
+  );
+  preparedAgents.push(prepared);
+  const toml = await readFile(prepared.configPath, "utf8");
+  expect(toml).not.toContain("[mcp_servers.");
+  expect(prepared.env.GH_TOKEN).toBe(credentials.github);
+  expect(prepared.env.SUPABASE_ACCESS_TOKEN).toBe(credentials.supabase);
+});
+
 it("normalizes shell events and reads only the SQLite-selected thread, deduplicating response usage", async () => {
   const prepared = await prepare("bash");
   emit(prepared, { type: "thread.started", thread_id: session });

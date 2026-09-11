@@ -214,7 +214,7 @@ export async function prepareCodex(
     "guardian_approval",
   ];
   const configuredServers =
-    benchmark === "suite" && credentials
+    benchmark === "suite" && trial.technique !== "bash" && credentials
       ? suiteServers(config, trial.technique, {
           github: "BENCH_GITHUB_TOKEN",
           supabase: "BENCH_SUPABASE_TOKEN",
