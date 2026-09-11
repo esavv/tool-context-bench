@@ -6,11 +6,13 @@ import { join } from "node:path";
 import { execute } from "./process.js";
 import type { Manifest } from "./types.js";
 
-export const agentSchema = z.enum(["claude", "codex", "opencode", "opencode2"]);
+export const agentSchema = z.enum(["claude", "codex", "opencode", "opencode2", "pi"]);
 export type Agent = z.infer<typeof agentSchema>;
 export const defaultAgents: Agent[] = ["claude", "codex", "opencode"];
 
 export function agentProfile(config: Config, agent: Agent) {
+  if (agent === "pi")
+    return { version: config.piVersion, model: config.piModel, variant: config.variant };
   if (agent === "claude")
     return { version: config.claudeVersion, model: config.claudeModel, variant: config.variant };
   if (agent === "codex")

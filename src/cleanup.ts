@@ -40,16 +40,27 @@ export async function cleanup(
   }
   try {
     if (options.credentials) {
-      messages.push(
-        `${options.apply ? "Delete" : "Would delete"} Keychain generic password: service=${config.keychainService}, account=${paths.account}`,
-      );
-      if (options.apply) {
+      const services = [
+        config.keychainService,
+        ...(config.suite
+          ? [
+              config.suite.supabase.keychainService,
+              config.suite.cloudflare.keychainService,
+              config.suite.stripe.keychainService,
+            ]
+          : []),
+      ];
+      for (const service of services) {
+        messages.push(
+          `${options.apply ? "Delete" : "Would delete"} Keychain generic password: service=${service}, account=${paths.account}`,
+        );
+        if (!options.apply) continue;
         const result = await execute("/usr/bin/security", [
           "delete-generic-password",
           "-a",
           paths.account,
           "-s",
-          config.keychainService,
+          service,
         ]).catch(() => {
           throw new Error(
             "Keychain deletion failed. Check access; no credential values were displayed.",
@@ -75,7 +86,7 @@ export async function cleanup(
       );
     }
     messages.push(
-      "Revoke the PAT in GitHub separately. Deleting a Keychain item does not revoke its remote authority.",
+      "Revoke remote service credentials separately. Deleting a Keychain item does not revoke its remote authority.",
     );
     if (!options.apply) messages.push("Dry run only. Add --apply to perform these actions.");
     return messages;

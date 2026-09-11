@@ -76,6 +76,21 @@ afterEach(async () => {
 });
 
 describe("schedule and prompt", () => {
+  it("limits pi to Bash in the 26-session suite schedule", () => {
+    const trials = schedule(
+      1,
+      ["bash", "mcp-raw", "mcp-tuned", "tool-search"],
+      1,
+      ["claude", "codex", "opencode2", "pi"],
+      "suite",
+    );
+    expect(trials).toHaveLength(26);
+    expect(trials.filter((item) => item.agent === "pi").map((item) => item.technique)).toEqual([
+      "bash",
+      "bash",
+    ]);
+  });
+
   it("defaults to 24 unique trials, with all eight cells in each repetition", () => {
     expect(config.repeats).toBe(3);
     const trials = schedule(config.repeats, techniques, 42);

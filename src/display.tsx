@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Box, Text, render, useApp, useInput, useStdout } from "ink";
-import type { Batch, BatchHistory, Metrics, Result, Trial } from "./types.js";
+import type { Batch, BatchHistory, Benchmark, Metrics, Result, Trial } from "./types.js";
 import { batchAgentProfiles, batchFields, combineBatches, selectionProblem } from "./batches.js";
 import { agentLabel, agentSchema } from "./agents.js";
 
@@ -18,7 +18,15 @@ const metrics: { key: Metric; label: string }[] = [
   { key: "steps", label: "Steps" },
 ];
 const workloads: Trial["workload"][] = ["task", "noop"];
-const techniques: Trial["technique"][] = ["bash", "mcp-raw", "mcp-filter", "mcp-filter-readonly"];
+const benchmarks: Benchmark[] = ["github", "suite"];
+const techniques: Trial["technique"][] = [
+  "bash",
+  "mcp-raw",
+  "mcp-filter",
+  "mcp-filter-readonly",
+  "mcp-tuned",
+  "tool-search",
+];
 
 export interface Statistics {
   n: number;
@@ -349,6 +357,7 @@ const palette = {
   codex: "#74d7c4",
   opencode: "#73a7ef",
   opencode2: "#c49aef",
+  pi: "#d4a85f",
   key: "#dabe73",
   amber: "#dabe73",
   white: "#e2e9df",
@@ -445,9 +454,11 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [size, setSize] = useState({ width: stdout.columns || 80, height: stdout.rows || 24 });
-  const available = history.batches.some((batch) => batch.manifest.id === initialBatch.manifest.id)
+  const allBatches = history.batches.some((batch) => batch.manifest.id === initialBatch.manifest.id)
     ? history.batches
     : [initialBatch, ...history.batches];
+  const [viewBenchmark, setViewBenchmark] = useState<Benchmark>(initialBatch.manifest.benchmark);
+  const available = allBatches.filter((batch) => batch.manifest.benchmark === viewBenchmark);
   const [batchIDs, setBatchIDs] = useState(new Set([initialBatch.manifest.id]));
   const [batchCursor, setBatchCursor] = useState(
     Math.max(
@@ -490,6 +501,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     numeric?: boolean;
   }[] = [
     { key: "timestamp", heading: "Timestamp" },
+    { key: "benchmark", heading: "Benchmark" },
     { key: "workload", heading: "Workload" },
     { key: "agents", heading: "Agents" },
     { key: "repeats", heading: "Repeats", numeric: true },
@@ -557,7 +569,8 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       : [
           ["i", "Initial input + cache"],
           ["t", "Total session tokens"],
-          ["1/2", "workload"],
+          ["1/2", "github task/no-op"],
+          ["3/4", "multi-tool task/no-op"],
           ["↑↓", "select"],
           ["enter", "detail"],
           ["q", "quit"],
@@ -686,8 +699,16 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       setNotice("");
       return;
     }
-    if (["1", "2"].includes(input)) {
-      setWorkload(workloads[Number(input) - 1] ?? "task");
+    if (["1", "2", "3", "4"].includes(input)) {
+      const nextBenchmark: Benchmark = Number(input) <= 2 ? "github" : "suite";
+      const nextWorkload = Number(input) % 2 === 1 ? "task" : "noop";
+      const nextAvailable = allBatches.filter(
+        (batch) => batch.manifest.benchmark === nextBenchmark,
+      );
+      setViewBenchmark(nextBenchmark);
+      setWorkload(nextWorkload);
+      setBatchCursor(0);
+      setBatchIDs(new Set(nextAvailable[0] ? [nextAvailable[0].manifest.id] : []));
       setSelected(0);
       setAttempt(0);
       setScroll(0);
@@ -734,16 +755,22 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
         </Text>
       </Box>
       <Box gap={2}>
-        {workloads.map((item, index) => (
-          <Text
-            key={item}
-            bold={item === workload}
-            {...inkColor(item === workload ? palette.white : palette.muted)}
-          >
-            {item === workload ? "▸" : " "}
-            <Text {...inkColor(palette.key)}>{index + 1}</Text> {item === "noop" ? "no-op" : item}
-          </Text>
-        ))}
+        {benchmarks.flatMap((benchmark, benchmarkIndex) =>
+          workloads.map((item, workloadIndex) => (
+            <Text
+              key={`${benchmark}-${item}`}
+              bold={benchmark === viewBenchmark && item === workload}
+              {...inkColor(
+                benchmark === viewBenchmark && item === workload ? palette.white : palette.muted,
+              )}
+            >
+              {benchmark === viewBenchmark && item === workload ? "▸" : " "}
+              <Text {...inkColor(palette.key)}>{benchmarkIndex * 2 + workloadIndex + 1}</Text>{" "}
+              {benchmark === "suite" ? "multi-tool " : ""}
+              {item === "noop" ? "no-op" : item}
+            </Text>
+          )),
+        )}
       </Box>
       {detail ? (
         <Panel
@@ -758,7 +785,10 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
           </Text>
         </Panel>
       ) : (
-        <Panel title={`github / ${workload} · ${label}`} width={width}>
+        <Panel
+          title={`${viewBenchmark === "suite" ? "multi-tool" : "github"} / ${workload} · ${label}`}
+          width={width}
+        >
           <Text {...inkColor(palette.muted)} wrap="truncate-end">
             median · shared scale 0–{formatted(max)}
             {visibleGroups.flat().length < rows.length

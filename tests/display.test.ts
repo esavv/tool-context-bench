@@ -42,6 +42,7 @@ function batch(results: Result[]): Batch {
       schemaVersion: 3,
       id: "batch-1",
       createdAt: "2026-09-09T00:00:00Z",
+      benchmark: "github",
       seed: 1,
       config: {
         repository: "owner/repo",
@@ -53,6 +54,8 @@ function batch(results: Result[]): Batch {
         claudeModel: "claude-sonnet-5",
         codexVersion: "0.153.3",
         codexModel: "gpt-5.6-terra",
+        piVersion: "0.85.1",
+        piModel: "openai-codex/gpt-5.6-terra",
         variant: "medium",
         repeats: 3,
         timeoutSeconds: 180,
@@ -200,6 +203,16 @@ describe("batch selection", () => {
     second.manifest.catalogs["mcp-raw"] = { hash: "catalog-b", toolCount: 44 };
     expect(() => combineBatches([first, second], first)).toThrow("catalog hashes differ");
     expect(selectionProblem([second])).toBeNull();
+  });
+
+  it("keeps GitHub and multi-tool batches separate", () => {
+    const github = batch([result("github")]);
+    const suite = structuredClone(github);
+    suite.manifest.id = "suite";
+    suite.manifest.benchmark = "suite";
+    expect(selectionProblem([github, suite])).toContain("benchmark differs");
+    expect(batchFields(github).benchmark).toBe("github");
+    expect(batchFields(suite).benchmark).toBe("suite");
   });
 
   it("describes workloads, agent, planned repeats, and completed sessions", () => {

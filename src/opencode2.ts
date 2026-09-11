@@ -21,7 +21,8 @@ import { EventCollector } from "./events.js";
 import { MCP_URL, type Catalog } from "./github.js";
 import { execute, minimalEnvironment } from "./process.js";
 import { mcpHeaders, techniqueSchema } from "./techniques.js";
-import type { Metrics, Trial } from "./types.js";
+import { suiteBinDirectory, suiteServers, type SuiteCredentials } from "./suite.js";
+import type { Benchmark, Metrics, Trial } from "./types.js";
 
 // Release workflow run 19425: https://github.com/anomalyco/opencode/actions/runs/34425206646
 export const opencode2Version = "0.0.0-beta-19425";
@@ -479,7 +480,12 @@ export function parseOpencode2Messages(
 /** Own the MCP server for one attempt. The beta's first snapshot can race its
  * debounced MCP tool registration even after the connection reports connected.
  */
-async function startMcpServer(binary: string, env: NodeJS.ProcessEnv, cwd: string) {
+async function startMcpServer(
+  binary: string,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  expectedServers = ["github"],
+) {
   const password = randomBytes(32).toString("base64url");
   env.OPENCODE_PASSWORD = password;
   const child = spawn(binary, ["serve", "--stdio", "--port", "0"], {
@@ -532,11 +538,14 @@ async function startMcpServer(binary: string, env: NodeJS.ProcessEnv, cwd: strin
     const deadline = Date.now() + 30000;
     for (;;) {
       const status = statusSchema.parse(await (await request("/api/mcp")).json()).data;
-      if (status.length !== 1 || status[0]?.name !== "github")
+      if (
+        status.length !== expectedServers.length ||
+        status.some((server) => !expectedServers.includes(server.name))
+      )
         throw new Error("Unexpected OpenCode 2 MCP server inventory.");
-      if (status[0].status.status === "connected") break;
-      if (status[0].status.status !== "pending" || Date.now() > deadline)
-        throw new Error("OpenCode 2 GitHub MCP did not connect.");
+      if (status.every((server) => server.status.status === "connected")) break;
+      if (status.some((server) => server.status.status !== "pending") || Date.now() > deadline)
+        throw new Error("OpenCode 2 MCP services did not connect.");
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     // Upstream McpTool uses a 100ms debounce. The context guard below verifies the
@@ -559,6 +568,8 @@ export async function prepareOpencode2(
   token: string,
   databasePath: string,
   binary: string,
+  benchmark: Benchmark = "github",
+  credentials?: SuiteCredentials,
 ): Promise<PreparedAgent> {
   techniqueSchema.parse(trial.technique);
   if (config.model !== "openai/gpt-5.6-terra" || config.maxSteps !== 8)
@@ -566,7 +577,8 @@ export async function prepareOpencode2(
   const bash = trial.technique === "bash";
   if (
     !bash &&
-    (!catalog?.names.length || catalog.names.some((name) => !/^github_[a-zA-Z0-9_-]+$/.test(name)))
+    (!catalog?.names.length ||
+      catalog.names.some((name) => !/^[a-zA-Z0-9-]+_[a-zA-Z0-9_-]+$/.test(name)))
   )
     throw new Error("OpenCode 2 MCP preparation requires a nonempty canonical GitHub catalog.");
   await opencode2Auth(databasePath);
@@ -579,17 +591,48 @@ export async function prepareOpencode2(
   const configPath = join(runtime, "bench.json");
   const env: NodeJS.ProcessEnv = {
     ...isolatedEnvironment(runtime, dataPath),
+    ...(benchmark === "suite"
+      ? { PATH: `${suiteBinDirectory}:${isolatedEnvironment(runtime, dataPath).PATH}` }
+      : {}),
     ...(bash ? { GH_TOKEN: token } : { BENCH_GITHUB_TOKEN: token }),
+    ...(credentials
+      ? {
+          BENCH_SUPABASE_TOKEN: credentials.supabase,
+          BENCH_CLOUDFLARE_TOKEN: credentials.cloudflare,
+          BENCH_STRIPE_TOKEN: credentials.stripe,
+          ...(bash
+            ? {
+                SUPABASE_ACCESS_TOKEN: credentials.supabase,
+                CLOUDFLARE_API_TOKEN: credentials.cloudflare,
+                CLOUDFLARE_ACCOUNT_ID: config.suite?.cloudflare.accountId,
+                STRIPE_API_KEY: credentials.stripe,
+              }
+            : {}),
+        }
+      : {}),
   };
   await checkVersion(binary, env, cwd);
   const permissions = [
     { action: "*", resource: "*", effect: "deny" },
     ...(bash
-      ? ["gh api *", "gh repo view *", "gh --help", "gh help *", "jq *", "wc *", "echo *"].map(
-          (resource) => ({ action: "shell", resource, effect: "allow" }),
-        )
+      ? [
+          "gh api *",
+          "gh repo view *",
+          "gh --help",
+          "gh help *",
+          "jq *",
+          "wc *",
+          "echo *",
+          ...(benchmark === "suite"
+            ? ["supabase functions list *", "wrangler d1 list *", "stripe webhook_endpoints list *"]
+            : []),
+        ].map((resource) => ({ action: "shell", resource, effect: "allow" }))
       : (catalog?.names ?? []).map((action) => ({ action, resource: "*", effect: "allow" }))),
-    { action: "execute", resource: "*", effect: "deny" },
+    {
+      action: "execute",
+      resource: "*",
+      effect: trial.technique === "tool-search" ? "allow" : "deny",
+    },
   ];
   await writeFile(
     configPath,
@@ -642,17 +685,39 @@ export async function prepareOpencode2(
         mcp: {
           servers: bash
             ? {}
-            : {
-                github: {
-                  type: "remote",
-                  url: MCP_URL,
-                  disabled: false,
-                  oauth: false,
-                  codemode: false,
-                  headers: mcpHeaders(trial.technique, "{env:BENCH_GITHUB_TOKEN}"),
-                  timeout: { startup: 30000, catalog: 30000, execution: 30000 },
+            : benchmark === "suite" && credentials
+              ? Object.fromEntries(
+                  Object.entries(
+                    suiteServers(config, trial.technique, {
+                      github: "{env:BENCH_GITHUB_TOKEN}",
+                      supabase: "{env:BENCH_SUPABASE_TOKEN}",
+                      cloudflare: "{env:BENCH_CLOUDFLARE_TOKEN}",
+                      stripe: "{env:BENCH_STRIPE_TOKEN}",
+                    }),
+                  ).map(([name, server]) => [
+                    name,
+                    {
+                      type: "remote",
+                      url: server.url,
+                      disabled: false,
+                      oauth: false,
+                      codemode: trial.technique === "tool-search",
+                      headers: server.headers,
+                      timeout: { startup: 30000, catalog: 30000, execution: 30000 },
+                    },
+                  ]),
+                )
+              : {
+                  github: {
+                    type: "remote",
+                    url: MCP_URL,
+                    disabled: false,
+                    oauth: false,
+                    codemode: false,
+                    headers: mcpHeaders(trial.technique, "{env:BENCH_GITHUB_TOKEN}"),
+                    timeout: { startup: 30000, catalog: 30000, execution: 30000 },
+                  },
                 },
-              },
         },
       },
       null,
@@ -662,7 +727,11 @@ export async function prepareOpencode2(
   );
   const pluginDirectory = join(runtime, "config", "plugins");
   await mkdir(pluginDirectory, { mode: 0o700 });
-  const expectedTools = bash ? ["shell"] : [...(catalog?.names ?? [])].sort();
+  const expectedTools = bash
+    ? ["shell"]
+    : trial.technique === "tool-search"
+      ? ["execute"]
+      : [...(catalog?.names ?? [])].sort();
   await writeFile(
     join(pluginDirectory, "bench-exposure.js"),
     `import { writeFile } from "node:fs/promises";
@@ -680,13 +749,22 @@ export default {
 `,
     { mode: 0o600 },
   );
-  const server = bash ? undefined : await startMcpServer(binary, env, cwd);
+  const server = bash
+    ? undefined
+    : await startMcpServer(
+        binary,
+        env,
+        cwd,
+        benchmark === "suite" ? ["github", "supabase", "cloudflare", "stripe"] : ["github"],
+      );
   const events = new EventCollector(
     config,
     trial,
     catalog?.names ?? [],
     token,
     catalog?.readOnlyNames ?? [],
+    benchmark,
+    credentials ? Object.values(credentials) : [],
   );
   return {
     directory,
@@ -701,7 +779,9 @@ export default {
       "Private HOME/XDG/config/work directory and attempt-owned server; project config disabled; no personal auth import.",
       "Benchmark context hook checks exact direct tool names before each model request. MCP startup settles before the measured client run.",
       `Native SQLite OPENCODE_DB=${dataPath} holds sessions and OAuth; native refresh writes are permitted there only. Do not export or copy this DB. collect().artifactPath is the safe JSONL artifact.`,
-      "Direct shell or MCP definitions only; MCP codemode=false; execute denied before tool snapshot; no Code Mode catalog.",
+      trial.technique === "tool-search"
+        ? "Integrated MCP search plus Code Mode: MCP codemode=true and execute is the only exposed service mechanism."
+        : "Direct shell or MCP definitions only; MCP codemode=false; execute denied before tool snapshot; no Code Mode catalog.",
       "steps=8 (eighth logical step is text-only; retries can add requests); explicit title prevents title generation.",
       "No OS sandbox: shell permissions plus post-run route validation are not a filesystem security boundary.",
       "Native V2 assistant step projections supply usage and model identity, reconciled with session counters; unknown fields remain unknown.",
@@ -727,7 +807,7 @@ export default {
           const native = part.data.tool;
           if (native === "execute") {
             events.codeMode = true;
-            events.invalidRoute = true;
+            if (trial.technique !== "tool-search") events.invalidRoute = true;
           }
           if (native === "shell") {
             part.data.tool = "bash";

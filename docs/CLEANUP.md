@@ -9,7 +9,7 @@ After installing the direct command with `npm link`, run `tcb` commands from any
 1. Stop the benchmark and access checks. Avoid concurrent use of the same agent login while an attempt uses shared subscription auth.
 2. Inspect the latest batch, including failures, pending sessions, expected SHA, tool routes, and usage warnings. Do not rerun until you understand the result.
 3. Export or back up the sanitized records you need outside the runtime root. Runtime deletion is irreversible from this app and includes the OpenCode 2 benchmark profile, local OAuth credentials, and sessions. Do not back up its credential/session database with reports.
-4. If retiring the benchmark PAT, revoke it in GitHub settings separately. Then preview and apply local credential cleanup.
+4. If retiring benchmark credentials, revoke them in each service separately. Then preview and apply local credential cleanup.
 
 Inspect saved results without model calls:
 
@@ -35,12 +35,14 @@ Do not copy OAuth tokens or a shared auth store into a results backup. OpenCode 
 Exports and backups outside the runtime root are user-managed. The app does not find or delete them. Sanitization can still leave private repository information. Review the content before sharing it.
 
 **Credential Scope**
-The only target of `--credentials` is the GitHub PAT Keychain **generic password** with:
+`--credentials` targets these benchmark Keychain **generic passwords**:
 
-| Field   | Exact value                                        |
-| ------- | -------------------------------------------------- |
-| Service | `tool-context-bench.github`                        |
-| Account | Current OS username, from `os.userInfo().username` |
+| Service                         | Account                                            |
+| ------------------------------- | -------------------------------------------------- |
+| `tool-context-bench.github`     | Current OS username, from `os.userInfo().username` |
+| `tool-context-bench.supabase`   | Current OS username, from `os.userInfo().username` |
+| `tool-context-bench.cloudflare` | Current OS username, from `os.userInfo().username` |
+| `tool-context-bench.stripe`     | Current OS username, from `os.userInfo().username` |
 
 You already created this item manually with:
 
@@ -50,10 +52,10 @@ security add-generic-password -a "$USER" -s "tool-context-bench.github" -w
 
 This is a record of the setup command, not a cleanup step. Do not repeat it for an existing item. The final `-w` prompts for the secret; `$USER` must match the OS account used by cleanup.
 
-The runner only reads this credential into memory and supplies it to GitHub requests. It does not print the value or create other generic-password items. OpenCode 2 local OAuth belongs to `--runtime`, not `--credentials`, because its benchmark database also stores sessions. There is no current general credential registry. Before any future service credential is provisioned, its exact target and cleanup procedure must be registered in the app's cleanup support and documentation.
+The runner reads these credentials into memory and supplies them only to their service routes. It does not print their values or create Keychain items. OpenCode 2 local OAuth belongs to `--runtime`, not `--credentials`, because its benchmark database also stores sessions. Future service credentials must be registered in the app's cleanup support and documentation before provisioning.
 
 **Remote Revocation**
-Deleting the Keychain item does **not** revoke the PAT. It removes one local copy only. Other copies can retain authority until GitHub revokes or expires the token.
+Deleting a Keychain item does **not** revoke its remote credential. It removes one local copy only. Other copies can retain authority until the service revokes or expires the credential.
 
 Deleting the OpenCode 2 runtime profile likewise removes only local OAuth state and sessions. It does not revoke the remote ChatGPT OAuth grant. Neither cleanup scope performs remote revocation; manage any required grant revocation separately with the provider.
 

@@ -21,7 +21,8 @@ import { EventCollector } from "./events.js";
 import { MCP_URL, type Catalog } from "./github.js";
 import { minimalEnvironment } from "./process.js";
 import { techniqueSettings } from "./techniques.js";
-import type { Metrics, Trial } from "./types.js";
+import { suiteBinDirectory, suiteServers, type SuiteCredentials } from "./suite.js";
+import type { Benchmark, Metrics, Trial } from "./types.js";
 
 const catalogSource =
   "https://raw.githubusercontent.com/openai/codex/b1a547b1f73ce86205d9222ac19cff334b3b7a2e/codex-rs/models-manager/models.json";
@@ -79,6 +80,8 @@ export async function prepareCodex(
   trial: Trial,
   catalog: Catalog | undefined,
   token: string,
+  benchmark: Benchmark = "github",
+  credentials?: SuiteCredentials,
 ): Promise<PreparedAgent> {
   if (config.codexVersion !== "0.153.3" || config.codexModel !== "gpt-5.6-terra")
     throw new Error("Codex requires version 0.153.3 and gpt-5.6-terra.");
@@ -98,6 +101,7 @@ export async function prepareCodex(
     await mkdir(path, { mode: 0o700 });
   const env: NodeJS.ProcessEnv = {
     ...minimalEnvironment(),
+    ...(benchmark === "suite" ? { PATH: `${suiteBinDirectory}:${minimalEnvironment().PATH}` } : {}),
     HOME: home,
     CODEX_HOME: codexHome,
     XDG_CONFIG_HOME: join(runtime, "config"),
@@ -110,6 +114,21 @@ export async function prepareCodex(
     GH_PROMPT_DISABLED: "1",
     GH_HOST: "github.com",
     ...(trial.technique === "bash" ? { GH_TOKEN: token } : { BENCH_GITHUB_TOKEN: token }),
+    ...(credentials
+      ? {
+          BENCH_SUPABASE_TOKEN: credentials.supabase,
+          BENCH_CLOUDFLARE_TOKEN: credentials.cloudflare,
+          BENCH_STRIPE_TOKEN: credentials.stripe,
+          ...(trial.technique === "bash"
+            ? {
+                SUPABASE_ACCESS_TOKEN: credentials.supabase,
+                CLOUDFLARE_API_TOKEN: credentials.cloudflare,
+                CLOUDFLARE_ACCOUNT_ID: config.suite?.cloudflare.accountId,
+                STRIPE_API_KEY: credentials.stripe,
+              }
+            : {}),
+        }
+      : {}),
   };
 
   // Fetch only during preparation. Keep every upstream model field, including Responses Lite.
@@ -134,7 +153,11 @@ export async function prepareCodex(
       typeof model.use_responses_lite !== "boolean"
     )
       throw new Error();
-    terra = { ...model, tool_mode: "direct", supports_search_tool: false };
+    terra = {
+      ...model,
+      tool_mode: trial.technique === "tool-search" ? "tool_search" : "direct",
+      supports_search_tool: trial.technique === "tool-search",
+    };
   } catch {
     throw new Error("Cannot load the pinned Codex Terra model descriptor. No substitute was used.");
   }
@@ -150,11 +173,13 @@ export async function prepareCodex(
     `Codex ${config.codexVersion}; model=${config.codexModel}; reasoning=${config.variant}`,
     `model_catalog_json=${modelPath}`,
     `model catalog source=${catalogSource}; sourceSHA256=${sourceSHA}; modifiedSHA256=${modifiedSHA}`,
-    "Terra descriptor preserved except tool_mode=direct and supports_search_tool=false; use_responses_lite unchanged.",
+    `Terra descriptor preserved except tool_mode=${trial.technique === "tool-search" ? "tool_search" : "direct"} and supports_search_tool=${trial.technique === "tool-search"}; use_responses_lite unchanged.`,
     "Native Terra code_mode_only overrides feature flags; the model catalog override is required.",
-    "Direct MCP definitions are not filtered by enabled_tools; deferred and code_mode surfaces are omitted.",
+    trial.technique === "tool-search"
+      ? "Native tool search enabled; direct and code_mode MCP surfaces are omitted."
+      : "Direct MCP definitions are not filtered by enabled_tools; deferred and code_mode surfaces are omitted.",
     "Private HOME, XDG directories and regular HOME/.codex; original auth symlink permits normal token refresh writes.",
-    "Project documents, bundled skills, apps, plugins, hooks, memories, search and Code Mode disabled; login shells disabled.",
+    `Project documents, bundled skills, apps, plugins, hooks, memories${trial.technique === "tool-search" ? "" : ", search"} and Code Mode disabled; login shells disabled.`,
     `approval_policy=never; sandbox=${bash ? "workspace-write; network_access=true for gh" : "read-only; shell_tool=false"}`,
     "Source-verified settings, not a live request capture; native response usage is best effort.",
   ];
@@ -188,6 +213,38 @@ export async function prepareCodex(
     "workspace_dependencies",
     "guardian_approval",
   ];
+  const configuredServers =
+    benchmark === "suite" && credentials
+      ? suiteServers(config, trial.technique, {
+          github: "BENCH_GITHUB_TOKEN",
+          supabase: "BENCH_SUPABASE_TOKEN",
+          cloudflare: "BENCH_CLOUDFLARE_TOKEN",
+          stripe: "BENCH_STRIPE_TOKEN",
+        })
+      : undefined;
+  const serverLines = configuredServers
+    ? Object.entries(configuredServers).flatMap(([name, server]) => {
+        const tokenName = server.headers.Authorization?.replace(/^Bearer /, "");
+        if (!tokenName) throw new Error(`Missing bearer token environment for ${name}.`);
+        const headers = Object.entries(server.headers).filter(([key]) => key !== "Authorization");
+        return [
+          `[mcp_servers.${name}]`,
+          `url = ${JSON.stringify(server.url)}`,
+          "enabled = true",
+          "required = true",
+          `bearer_token_env_var = ${JSON.stringify(tokenName)}`,
+          `omit_tools_from = ${JSON.stringify(trial.technique === "tool-search" ? ["direct", "code_mode"] : ["deferred", "code_mode"])}`,
+          ...(headers.length
+            ? [
+                `[mcp_servers.${name}.http_headers]`,
+                ...headers.map(
+                  ([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`,
+                ),
+              ]
+            : []),
+        ];
+      })
+    : [];
   const toml = [
     `model = ${JSON.stringify(config.codexModel)}`,
     'model_provider = "openai"',
@@ -223,7 +280,8 @@ export async function prepareCodex(
           "exclude_tmpdir_env_var = true",
         ]
       : []),
-    ...(exposure.mcpEnabled
+    ...serverLines,
+    ...(!configuredServers && exposure.mcpEnabled
       ? [
           "[mcp_servers.github]",
           `url = ${JSON.stringify(MCP_URL)}`,
@@ -258,16 +316,18 @@ export async function prepareCodex(
     catalog?.names ?? [],
     token,
     catalog?.readOnlyNames ?? [],
+    benchmark,
+    credentials ? Object.values(credentials) : [],
   );
   const stdoutUsage: unknown[] = [];
   const seenItems = new Set<string>();
   const dataPath = join(codexHome, "state_5.sqlite");
   const observeNativeTool = (name: string): boolean => {
-    if (name.startsWith("github_")) return false;
+    if (catalog?.names.includes(name)) return false;
     const code = /code.?mode|execute.?code|executor|node_repl|cua_repl/.test(name);
     if (!code && !/^(?:tool_search|web_search)(?:_call)?$/.test(name)) return false;
     events.codeMode ||= code;
-    events.invalidRoute = true;
+    if (trial.technique !== "tool-search") events.invalidRoute = true;
     const warning = "Codex search or Code Mode use was observed despite direct-tool settings.";
     if (!events.warnings.includes(warning)) events.warnings.push(warning);
     return true;

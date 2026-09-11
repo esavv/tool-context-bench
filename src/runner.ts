@@ -3,7 +3,15 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Config, Paths } from "./config.js";
-import type { Batch, Result, Technique, Trial } from "./types.js";
+import {
+  expectedSchema,
+  suiteExpectedSchema,
+  type Batch,
+  type Benchmark,
+  type Result,
+  type Technique,
+  type Trial,
+} from "./types.js";
 import { acquireLock, ensureRoot, saveJson } from "./storage.js";
 import { githubToken, inspectSubscription, redact } from "./credentials.js";
 import { prepareAttempt, agentConfig } from "./opencode.js";
@@ -19,6 +27,15 @@ import { schedule, prompt } from "./schedule.js";
 import { execute } from "./process.js";
 import { EventCollector } from "./events.js";
 import { collectUsage } from "./usage.js";
+import { piAuth, preparePi } from "./pi.js";
+import {
+  readSuiteCatalog,
+  readSuiteExpected,
+  suiteAnswerMatches,
+  suiteCliVersions,
+  suiteCredentials,
+  type SuiteCredentials,
+} from "./suite.js";
 
 async function verifyConfig(
   binary: string,
@@ -66,6 +83,8 @@ async function checkAuth(agent: Agent, binary: string, paths: Paths): Promise<vo
   if (agent === "claude") await claudeAuth(binary);
   else if (agent === "codex") await codexAuth();
   else if (agent === "opencode2") await opencode2Auth(paths.opencode2Database);
+  else if (agent === "pi")
+    throw new Error("pi authentication requires the loaded benchmark configuration.");
   else await inspectSubscription(paths.auth);
 }
 
@@ -77,9 +96,17 @@ async function prepare(
   catalog: Catalog | undefined,
   token: string,
   binary: string,
+  benchmark: Benchmark = "github",
+  credentials?: SuiteCredentials,
 ): Promise<PreparedAgent> {
-  if (trial.agent === "claude") return prepareClaude(directory, config, trial, catalog, token);
-  if (trial.agent === "codex") return prepareCodex(directory, config, trial, catalog, token);
+  if (trial.agent === "pi") {
+    if (!credentials) throw new Error("Suite credentials are required for pi.");
+    return preparePi(directory, config, trial, credentials);
+  }
+  if (trial.agent === "claude")
+    return prepareClaude(directory, config, trial, catalog, token, benchmark, credentials);
+  if (trial.agent === "codex")
+    return prepareCodex(directory, config, trial, catalog, token, benchmark, credentials);
   if (trial.agent === "opencode2")
     return prepareOpencode2(
       directory,
@@ -89,7 +116,10 @@ async function prepare(
       token,
       paths.opencode2Database,
       binary,
+      benchmark,
+      credentials,
     );
+  if (benchmark === "suite") throw new Error("OpenCode 1 is not supported by the suite benchmark.");
   const prepared = await prepareAttempt(directory, paths.auth, config, trial, catalog?.names ?? []);
   if (trial.technique === "bash") prepared.env.GH_TOKEN = token;
   else prepared.env.BENCH_GITHUB_TOKEN = token;
@@ -153,8 +183,15 @@ export async function doctor(
   paths: Paths,
   checkAccess = false,
   agents: Agent[] = defaultAgents,
+  benchmark: Benchmark = "github",
 ): Promise<string[]> {
+  if (
+    (benchmark === "suite" && agents.includes("opencode")) ||
+    (benchmark === "github" && agents.includes("pi"))
+  )
+    throw new Error("The selected agent is not supported by this benchmark.");
   const installed = await binaries(config, agents);
+  if (benchmark === "suite") Object.assign(installed.versions, await suiteCliVersions(config));
   const lines = [
     installed.versions.gh,
     `Repository: ${config.repository}, branch: ${config.branch}`,
@@ -163,7 +200,8 @@ export async function doctor(
   for (const agent of agents) {
     const binary = installed.executables[agent];
     if (!binary) throw new Error(`Missing ${agent} executable.`);
-    await checkAuth(agent, binary, paths);
+    if (agent === "pi") await piAuth(binary, config);
+    else await checkAuth(agent, binary, paths);
     lines.push(
       `${agentLabel(agent)} ${installed.versions[agent]}: pin matched; subscription auth available (values hidden)`,
     );
@@ -171,16 +209,25 @@ export async function doctor(
   if (!checkAccess)
     return [
       ...lines,
-      "GitHub Keychain, GitHub APIs, MCP, and model entitlement were not contacted. Use --check-access for read-only preflight.",
+      "Service Keychain items, remote APIs, MCP, and model entitlement were not contacted. Use --check-access for read-only preflight.",
     ];
   await ensureRoot(paths);
   const release = await acquireLock(paths);
   try {
-    const token = await githubToken(config, paths);
+    const credentials = benchmark === "suite" ? await suiteCredentials(config, paths) : undefined;
+    const token = credentials?.github ?? (await githubToken(config, paths));
     await mkdir(join(paths.root, "probe"), { recursive: true, mode: 0o700 });
-    const expected = await readExpected(config, token, installed.gh, join(paths.root, "probe"));
-    for (const technique of techniqueSchema.options.filter((item) => item !== "bash")) {
-      const catalog = await readCatalog(technique, token);
+    const expected = credentials
+      ? await readSuiteExpected(config, credentials, installed.gh, join(paths.root, "probe"))
+      : await readExpected(config, token, installed.gh, join(paths.root, "probe"));
+    const techniques =
+      benchmark === "suite"
+        ? ["mcp-raw", "mcp-tuned", "tool-search"]
+        : ["mcp-raw", "mcp-filter", "mcp-filter-readonly"];
+    for (const technique of z.array(techniqueSchema).parse(techniques)) {
+      const catalog = credentials
+        ? await readSuiteCatalog(config, technique, credentials)
+        : await readCatalog(technique, token);
       lines.push(`${technique}: ${catalog.names.length} tools; SHA-256 ${catalog.hash}`);
     }
     for (const agent of agents) {
@@ -201,6 +248,8 @@ export async function doctor(
         undefined,
         token,
         binary,
+        benchmark,
+        credentials,
       );
       try {
         if (agent === "opencode") {
@@ -230,7 +279,10 @@ export async function doctor(
         await prepared.cleanup();
       }
     }
-    lines.push("GitHub Keychain item: readable (value hidden)", `GitHub commit: ${expected.sha}`);
+    lines.push(
+      `${benchmark === "suite" ? "Suite" : "GitHub"} Keychain item(s): readable (values hidden)`,
+      `GitHub commit: ${"github" in expected ? expected.github.sha : expected.sha}`,
+    );
     return lines;
   } finally {
     await release();
@@ -238,6 +290,7 @@ export async function doctor(
 }
 
 export interface RunOptions {
+  benchmark: Benchmark;
   agents: Agent[];
   repeats: number;
   techniques: Technique[];
@@ -252,18 +305,33 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
   const release = await acquireLock(paths);
   try {
     const installed = await binaries(config, options.agents);
+    if (options.benchmark === "suite")
+      Object.assign(installed.versions, await suiteCliVersions(config));
+    if (
+      (options.benchmark === "suite" && options.agents.includes("opencode")) ||
+      (options.benchmark === "github" && options.agents.includes("pi"))
+    )
+      throw new Error("The selected agent is not supported by this benchmark.");
     for (const agent of options.agents) {
       const binary = installed.executables[agent];
       if (!binary) throw new Error(`Missing ${agent} executable.`);
-      await checkAuth(agent, binary, paths);
+      if (agent === "pi") await piAuth(binary, config);
+      else await checkAuth(agent, binary, paths);
     }
-    const token = await githubToken(config, paths);
+    const credentials =
+      options.benchmark === "suite" ? await suiteCredentials(config, paths) : undefined;
+    const token = credentials?.github ?? (await githubToken(config, paths));
     await mkdir(join(paths.root, "probe"), { recursive: true, mode: 0o700 });
     const oracleHome = join(paths.root, "probe");
-    const expected = await readExpected(config, token, installed.gh, oracleHome);
+    const expected = credentials
+      ? await readSuiteExpected(config, credentials, installed.gh, oracleHome)
+      : await readExpected(config, token, installed.gh, oracleHome);
     const catalogs: Partial<Record<Technique, Catalog>> = {};
     for (const technique of options.techniques) {
-      if (technique !== "bash") catalogs[technique] = await readCatalog(technique, token);
+      if (technique !== "bash")
+        catalogs[technique] = credentials
+          ? await readSuiteCatalog(config, technique, credentials)
+          : await readCatalog(technique, token);
     }
     const id = `${new Date().toISOString().replace(/[:.]/g, "-")}_${randomUUID().slice(0, 8)}`;
     const directory = join(paths.results, id);
@@ -273,12 +341,14 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
       options.techniques,
       options.seed,
       options.agents,
+      options.benchmark,
     ).filter((trial) => options.workloads.includes(trial.workload));
     const batch: Batch = {
       manifest: {
         schemaVersion: 3,
         id,
         createdAt: new Date().toISOString(),
+        benchmark: options.benchmark,
         config: { ...config, repeats: options.repeats },
         seed: options.seed,
         schedule: planned,
@@ -308,13 +378,17 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
       const checked = await binaries(config, [trial.agent]);
       const binary = checked.executables[trial.agent];
       if (!binary) throw new Error(`Missing ${trial.agent} executable.`);
-      const before = await readExpected(config, token, installed.gh, oracleHome);
-      if (before.sha !== expected.sha) {
-        options.progress("Stopped: repository changed before next attempt.");
+      const before = credentials
+        ? await readSuiteExpected(config, credentials, installed.gh, oracleHome)
+        : await readExpected(config, token, installed.gh, oracleHome);
+      if (JSON.stringify(before) !== JSON.stringify(expected)) {
+        options.progress("Stopped: benchmark fixtures changed before next attempt.");
         break;
       }
       if (catalog) {
-        const current = await readCatalog(trial.technique, token);
+        const current = credentials
+          ? await readSuiteCatalog(config, trial.technique, credentials)
+          : await readCatalog(trial.technique, token);
         if (current.hash !== catalog.hash) {
           options.progress("Stopped: MCP catalog changed.");
           break;
@@ -329,6 +403,8 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
         catalog,
         token,
         binary,
+        options.benchmark,
+        credentials,
       );
       const result: Result = {
         trial,
@@ -347,7 +423,9 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
           databasePath: prepared.dataPath,
           workDirectory: prepared.cwd,
           settings: [
-            `MCP: ${exposure.mcpEnabled ? "enabled" : "disabled"}; toolset filter: ${exposure.toolsets ?? "none"}; MCP read-only mode: ${exposure.readOnly ? "enabled" : "disabled"}; catalog tools: ${catalog?.names.length ?? 0}`,
+            options.benchmark === "suite"
+              ? `Suite route: ${trial.technique}; MCP: ${exposure.mcpEnabled ? "enabled" : "disabled"}; catalog tools: ${catalog?.names.length ?? 0}`
+              : `MCP: ${exposure.mcpEnabled ? "enabled" : "disabled"}; toolset filter: ${exposure.toolsets ?? "none"}; MCP read-only mode: ${exposure.readOnly ? "enabled" : "disabled"}; catalog tools: ${catalog?.names.length ?? 0}`,
             ...prepared.settings,
           ],
           dataKind: prepared.dataKind,
@@ -356,29 +434,44 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
       batch.results.push(result);
       const resultFile = join(directory, `${trial.id}.result.json`);
       await saveJson(resultFile, result);
-      await writeFile(join(attemptDirectory, "prompt.txt"), prompt(config, trial), { mode: 0o600 });
+      await writeFile(
+        join(attemptDirectory, "prompt.txt"),
+        prompt(config, trial, options.benchmark),
+        {
+          mode: 0o600,
+        },
+      );
       options.progress(
         `[${batch.results.length}/${planned.length}] ${agentLabel(trial.agent)} ${trial.technique} ${trial.workload} ${trial.repetition}`,
       );
       const events = prepared.events;
       const started = performance.now();
       try {
-        const processResult = await execute(binary, prepared.args, {
-          env: prepared.env,
-          cwd: prepared.cwd,
-          input: prompt(config, trial),
-          timeoutMs: config.timeoutSeconds * 1000,
-          signal: options.signal,
-          onLine: prepared.onLine,
-        });
+        const trialPrompt = prompt(config, trial, options.benchmark);
+        const processResult = await execute(
+          binary,
+          prepared.promptArgument ? [...prepared.args, trialPrompt] : prepared.args,
+          {
+            env: prepared.env,
+            cwd: prepared.cwd,
+            input: prepared.promptArgument ? undefined : trialPrompt,
+            timeoutMs: config.timeoutSeconds * 1000,
+            signal: options.signal,
+            onLine: prepared.onLine,
+          },
+        );
         result.durationMs = Math.round(performance.now() - started);
-        if (trial.agent === "claude")
-          await writeFile(prepared.dataPath, redact(processResult.stdout, [token]), {
-            mode: 0o600,
-          });
+        if (trial.agent === "claude" || trial.agent === "pi")
+          await writeFile(
+            prepared.dataPath,
+            redact(processResult.stdout, credentials ? Object.values(credentials) : [token]),
+            {
+              mode: 0o600,
+            },
+          );
         await writeFile(
           join(attemptDirectory, "stderr.txt"),
-          redact(processResult.stderr, [token]),
+          redact(processResult.stderr, credentials ? Object.values(credentials) : [token]),
           { mode: 0o600 },
         );
         result.sessionID = events.sessionID;
@@ -392,7 +485,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
         result.warnings.push(...events.warnings);
         if (events.malformed) result.warnings.push("Incomplete or malformed CLI event stream.");
         let usage: AgentUsage | undefined;
-        if (events.sessionID) {
+        if (events.sessionID || prepared.collectWithoutSession) {
           for (let attempt = 0; attempt < 4; attempt++) {
             try {
               usage = await prepared.collect();
@@ -433,7 +526,9 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
         result.warnings = [...new Set([...result.warnings, ...events.warnings])];
         const answerOK =
           trial.workload === "task"
-            ? answerMatches(events.answer, expected)
+            ? options.benchmark === "suite"
+              ? suiteAnswerMatches(events.answer, suiteExpectedSchema.parse(expected))
+              : answerMatches(events.answer, expectedSchema.parse(expected))
             : events.answer.trim() === "OK";
         result.success = processResult.code === 0 && !events.error && events.routeValid && answerOK;
         result.status = options.signal.aborted
@@ -458,8 +553,10 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
           result.warnings.push(
             `${agentLabel(trial.agent)} exited unsuccessfully. Inspect private stderr.txt in the attempt directory.`,
           );
-        const after = await readExpected(config, token, installed.gh, oracleHome);
-        if (after.sha !== expected.sha) {
+        const after = credentials
+          ? await readSuiteExpected(config, credentials, installed.gh, oracleHome)
+          : await readExpected(config, token, installed.gh, oracleHome);
+        if (JSON.stringify(after) !== JSON.stringify(expected)) {
           result.status = "fixture-drift";
           result.success = false;
         }

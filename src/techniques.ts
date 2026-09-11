@@ -1,7 +1,22 @@
 import { z } from "zod";
 
-export const techniqueSchema = z.enum(["bash", "mcp-raw", "mcp-filter", "mcp-filter-readonly"]);
+export const techniqueSchema = z.enum([
+  "bash",
+  "mcp-raw",
+  "mcp-filter",
+  "mcp-filter-readonly",
+  "mcp-tuned",
+  "tool-search",
+]);
 export type Technique = z.infer<typeof techniqueSchema>;
+
+export const githubTechniques: Technique[] = [
+  "bash",
+  "mcp-raw",
+  "mcp-filter",
+  "mcp-filter-readonly",
+];
+export const suiteTechniques: Technique[] = ["bash", "mcp-raw", "mcp-tuned", "tool-search"];
 
 export function techniqueSettings(technique: Technique) {
   return {

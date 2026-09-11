@@ -23,9 +23,10 @@ export function selectionProblem(batches: readonly Batch[]): string | null {
   if (!first || batches.length < 2) return null;
   const settings = (batch: Batch): Record<string, string | number> => ({
     "GitHub CLI version": batch.manifest.versions.gh,
+    benchmark: batch.manifest.benchmark,
     repository: batch.manifest.config.repository,
     branch: batch.manifest.config.branch,
-    "fixture commit": batch.manifest.expected.sha,
+    fixture: JSON.stringify(batch.manifest.expected),
     "step limit": batch.manifest.config.maxSteps,
     "timeout limit": batch.manifest.config.timeoutSeconds,
     "exposure evidence": batch.manifest.exposure,
@@ -91,9 +92,12 @@ export function combineBatches(batches: readonly Batch[], fallback: Batch): Batc
       } else if (agent === "opencode2") {
         config.opencode2Version = batch.manifest.config.opencode2Version;
         config.model = batch.manifest.config.model;
-      } else {
+      } else if (agent === "opencode") {
         config.opencodeVersion = batch.manifest.config.opencodeVersion;
         config.model = batch.manifest.config.model;
+      } else {
+        config.piVersion = batch.manifest.config.piVersion;
+        config.piModel = batch.manifest.config.piModel;
       }
     }
   }
@@ -165,6 +169,7 @@ export function batchFields(batch: Batch) {
     .join("/");
   return {
     timestamp,
+    benchmark: batch.manifest.benchmark,
     workload,
     agents: agents || "no agents",
     repeats,

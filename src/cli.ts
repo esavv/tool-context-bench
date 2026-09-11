@@ -5,8 +5,9 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { loadConfig, runtimePaths } from "./config.js";
-import { techniqueSchema } from "./types.js";
+import { benchmarkSchema, techniqueSchema } from "./types.js";
 import { agentSchema, defaultAgents, agentProfile, agentLabel, binaries } from "./agents.js";
+import { githubTechniques, suiteTechniques } from "./techniques.js";
 import { loadBatch, loadBatchHistory, ensureRoot, acquireLock } from "./storage.js";
 import { textReport, csvReport, renderReport } from "./display.js";
 import { schedule } from "./schedule.js";
@@ -14,7 +15,7 @@ import { redact } from "./credentials.js";
 
 const program = new Command()
   .name("tcb")
-  .description("Point-in-time coding-agent GitHub tool-context benchmark")
+  .description("Point-in-time coding-agent tool-context benchmark")
   .version("0.1.0")
   .option(
     "--config <file>",
@@ -37,15 +38,34 @@ async function context(command: Command) {
 const selectionSchema = z.object({
   repeats: z.coerce.number().int().min(1).max(10).optional(),
   seed: z.coerce.number().int().min(0).max(2147483647).optional(),
-  techniques: z.string().default(techniqueSchema.options.join(",")),
+  techniques: z.string().optional(),
   workloads: z.string().default("task,noop"),
-  benchmark: z.literal("github").default("github"),
-  agents: z.string().default(defaultAgents.join(",")),
+  benchmark: benchmarkSchema.default("github"),
+  agents: z.string().optional(),
   tui: z.boolean().default(true),
 });
 
 function selected(command: Command, repeats: number) {
   const options = selectionSchema.parse(command.opts());
+  const agentNames =
+    options.agents?.split(",") ??
+    (options.benchmark === "suite" ? ["claude", "codex", "opencode2", "pi"] : defaultAgents);
+  const techniqueNames =
+    options.techniques?.split(",") ??
+    (options.benchmark === "suite" ? suiteTechniques : githubTechniques);
+  const selectedTechniques = z
+    .array(techniqueSchema)
+    .min(1)
+    .parse([...new Set(techniqueNames)]);
+  const allowedTechniques = options.benchmark === "suite" ? suiteTechniques : githubTechniques;
+  if (selectedTechniques.some((technique) => !allowedTechniques.includes(technique)))
+    throw new Error(`Invalid ${options.benchmark} technique selection.`);
+  if (
+    agentNames.some((agent) =>
+      options.benchmark === "suite" ? agent === "opencode" : agent === "pi",
+    )
+  )
+    throw new Error(`Invalid ${options.benchmark} agent selection.`);
   return {
     ...options,
     repeats: options.repeats ?? repeats,
@@ -53,12 +73,9 @@ function selected(command: Command, repeats: number) {
     agents: z
       .array(agentSchema)
       .min(1)
-      .parse([...new Set(options.agents.split(","))])
+      .parse([...new Set(agentNames)])
       .sort(),
-    techniques: z
-      .array(techniqueSchema)
-      .min(1)
-      .parse([...new Set(options.techniques.split(","))]),
+    techniques: selectedTechniques,
     workloads: z
       .array(z.enum(["task", "noop"]))
       .min(1)
@@ -68,17 +85,12 @@ function selected(command: Command, repeats: number) {
 
 function selectOptions(command: Command) {
   return command
-    .option("--benchmark <name>", "Only github is implemented", "github")
+    .option("--benchmark <name>", "github or suite", "github")
     .option(
       "--agents <names>",
-      "Comma-separated claude,codex,opencode,opencode2 (v2 is opt-in)",
-      defaultAgents.join(","),
+      "Comma-separated claude,codex,opencode,opencode2,pi (defaults depend on benchmark)",
     )
-    .option(
-      "--techniques <names>",
-      "Comma-separated bash,mcp-raw,mcp-filter,mcp-filter-readonly",
-      techniqueSchema.options.join(","),
-    )
+    .option("--techniques <names>", "Comma-separated techniques (defaults depend on benchmark)")
     .option("--workloads <names>", "Comma-separated task,noop", "task,noop")
     .option("--repeats <count>", "Attempts per combination (default from bench.json: 3)")
     .option("--seed <integer>", "Deterministic block-order seed");
@@ -87,11 +99,8 @@ function selectOptions(command: Command) {
 program
   .command("doctor")
   .description("Check versions and existing subscription auth; no model calls")
-  .option(
-    "--agents <names>",
-    "Comma-separated claude,codex,opencode,opencode2 (v2 is opt-in)",
-    defaultAgents.join(","),
-  )
+  .option("--benchmark <name>", "github or suite", "github")
+  .option("--agents <names>", "Comma-separated agents (defaults depend on benchmark)")
   .option(
     "--check-access",
     "Read Keychain, verify GitHub/MCP reads, and check isolated config/model catalog",
@@ -99,8 +108,15 @@ program
   .action(async (_options: unknown, command: Command) => {
     const { config, paths } = await context(command);
     const options = z
-      .object({ checkAccess: z.boolean().default(false), agents: z.string() })
+      .object({
+        checkAccess: z.boolean().default(false),
+        benchmark: benchmarkSchema,
+        agents: z.string().optional(),
+      })
       .parse(command.opts());
+    const agents =
+      options.agents?.split(",") ??
+      (options.benchmark === "suite" ? ["claude", "codex", "opencode2", "pi"] : defaultAgents);
     const { doctor } = await import("./runner.js");
     console.log(
       (
@@ -111,7 +127,8 @@ program
           z
             .array(agentSchema)
             .min(1)
-            .parse([...new Set(options.agents.split(","))]),
+            .parse([...new Set(agents)]),
+          options.benchmark,
         )
       ).join("\n"),
     );
@@ -143,9 +160,13 @@ selectOptions(
 ).action(async (_options: unknown, command: Command) => {
   const { config } = await context(command);
   const options = selected(command, config.repeats);
-  const trials = schedule(options.repeats, options.techniques, options.seed, options.agents).filter(
-    (trial) => options.workloads.includes(trial.workload),
-  );
+  const trials = schedule(
+    options.repeats,
+    options.techniques,
+    options.seed,
+    options.agents,
+    options.benchmark,
+  ).filter((trial) => options.workloads.includes(trial.workload));
   console.log(
     `${options.agents
       .map((agent) => {
@@ -154,14 +175,16 @@ selectOptions(
       })
       .join(
         "\n",
-      )}\n${config.repository}:${config.branch} | ${trials.length} sessions | seed ${options.seed}\n`,
+      )}\n${options.benchmark} | ${config.repository}:${config.branch} | ${trials.length} sessions | seed ${options.seed}\n`,
   );
   for (const trial of trials)
     console.log(
       `${trial.repetition}  ${trial.agent.padEnd(8)}  ${trial.technique.padEnd(19)}  ${trial.workload}`,
     );
   console.log(
-    "\nNo model calls. A session can contain several model steps. Each technique fixes its MCP filtering/read-only configuration; all use the same restricted PAT.",
+    options.benchmark === "suite"
+      ? "\nNo model calls. A session can contain several model steps. The suite uses four fixed remote fixtures and route-specific credentials."
+      : "\nNo model calls. A session can contain several model steps. Each technique fixes its MCP filtering/read-only configuration; all use the same restricted PAT.",
   );
 });
 
@@ -229,7 +252,7 @@ program
 program
   .command("cleanup")
   .description("Preview cleanup of exact benchmark items; --apply is required to delete")
-  .option("--credentials", "Delete only the registered benchmark GitHub Keychain item")
+  .option("--credentials", "Delete the registered benchmark service Keychain items")
   .option(
     "--runtime",
     "Delete attempts, results, and the private OpenCode 2 login/profile (not personal auth)",

@@ -5,21 +5,25 @@ import type { Config, Paths } from "./config.js";
 import { execute } from "./process.js";
 
 export async function githubToken(config: Config, paths: Paths): Promise<string> {
+  return keychainToken(config.keychainService, paths, "GitHub");
+}
+
+export async function keychainToken(service: string, paths: Paths, label: string): Promise<string> {
   const result = await execute("/usr/bin/security", [
     "find-generic-password",
     "-a",
     paths.account,
     "-s",
-    config.keychainService,
+    service,
     "-w",
   ]);
   if (result.code !== 0 || result.stopped)
     throw new Error(
-      "GitHub Keychain item is unavailable. Check the item and unlock/access prompts on this Mac.",
+      `${label} Keychain item is unavailable. Check the item and unlock/access prompts on this Mac.`,
     );
   const token = result.stdout.trim();
   if (!/^[A-Za-z0-9_]+$/.test(token) || token.length < 20)
-    throw new Error("GitHub Keychain item is not a valid token value.");
+    throw new Error(`${label} Keychain item is not a valid token value.`);
   return token;
 }
 

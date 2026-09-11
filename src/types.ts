@@ -4,6 +4,8 @@ import { techniqueSchema } from "./techniques.js";
 import { agentSchema, type Agent } from "./agents.js";
 
 export { techniqueSchema, type Technique } from "./techniques.js";
+export const benchmarkSchema = z.enum(["github", "suite"]);
+export type Benchmark = z.infer<typeof benchmarkSchema>;
 export const trialSchema = z.object({
   id: z.string(),
   agent: agentSchema,
@@ -20,6 +22,19 @@ export const expectedSchema = z.object({
   source_url: z.string().url(),
 });
 export type Expected = z.infer<typeof expectedSchema>;
+
+export const suiteExpectedSchema = z.object({
+  github: expectedSchema,
+  supabase: z.object({ id: z.string().uuid(), slug: z.string(), status: z.string() }),
+  cloudflare: z.object({
+    uuid: z.string().uuid(),
+    name: z.string(),
+    created_at: z.string(),
+    version: z.string(),
+  }),
+  stripe: z.object({ webhook_endpoint_id: z.string(), description: z.string().nullable() }),
+});
+export type SuiteExpected = z.infer<typeof suiteExpectedSchema>;
 
 export const metricSchema = z.object({
   initialInput: z.number().nullable(),
@@ -75,15 +90,20 @@ export const manifestSchema = z.object({
   schemaVersion: z.literal(3),
   id: z.string(),
   createdAt: z.string(),
+  benchmark: benchmarkSchema.default("github"),
   config: configSchema,
   seed: z.number().int(),
   schedule: z.array(trialSchema),
-  expected: expectedSchema,
+  expected: z.union([expectedSchema, suiteExpectedSchema]),
   versions: z.object({
     claude: z.string().optional(),
     codex: z.string().optional(),
     opencode: z.string().optional(),
     opencode2: z.string().optional(),
+    pi: z.string().optional(),
+    supabase: z.string().optional(),
+    wrangler: z.string().optional(),
+    stripe: z.string().optional(),
     gh: z.string(),
     node: z.string(),
   }),

@@ -1,29 +1,33 @@
 import { createHash } from "node:crypto";
 import type { Config } from "./config.js";
-import type { Technique, Trial } from "./types.js";
+import type { Benchmark, Technique, Trial } from "./types.js";
 import type { Agent } from "./agents.js";
+import { suitePrompt } from "./suite.js";
 
 export function schedule(
   repeats: number,
   techniques: Technique[],
   seed: number,
   agents: Agent[] = ["opencode"],
+  benchmark: Benchmark = "github",
 ): Trial[] {
   const trials: Trial[] = [];
   for (let repetition = 1; repetition <= repeats; repetition++) {
     const workloads: Trial["workload"][] = ["task", "noop"];
     const block: Trial[] = agents.flatMap((agent) =>
-      techniques.flatMap((technique) =>
-        workloads.map((workload): Trial => {
-          return {
-            id: `${agent}-${technique}-${workload}-${repetition}`,
-            agent,
-            technique,
-            workload,
-            repetition,
-          };
-        }),
-      ),
+      techniques
+        .filter((technique) => benchmark !== "suite" || agent !== "pi" || technique === "bash")
+        .flatMap((technique) =>
+          workloads.map((workload): Trial => {
+            return {
+              id: `${agent}-${technique}-${workload}-${repetition}`,
+              agent,
+              technique,
+              workload,
+              repetition,
+            };
+          }),
+        ),
     );
     const hash = (trial: Trial) => createHash("sha256").update(`${seed}:${trial.id}`).digest("hex");
     block.sort((a, b) => hash(a).localeCompare(hash(b)));
@@ -32,7 +36,11 @@ export function schedule(
   return trials;
 }
 
-export function prompt(config: Config, trial: Trial): string {
+export function prompt(config: Config, trial: Trial, benchmark: Benchmark = "github"): string {
+  if (benchmark === "suite") {
+    // Keep the suite prompt with its fixture schema and route definitions.
+    return suitePrompt(config, trial);
+  }
   if (trial.workload !== "task") return "Reply with exactly OK. Do not call any tools.";
   const route =
     trial.technique === "bash"

@@ -116,6 +116,7 @@ async function writeBatch(id: string): Promise<Batch> {
       schemaVersion: 3,
       id,
       createdAt: "2026-09-09T00:00:00Z",
+      benchmark: "github",
       config,
       seed: 1,
       schedule: results.map((result) => result.trial),
@@ -164,7 +165,7 @@ describe("cleanup", () => {
       expect(messages).toContain(`Would remove ${join(paths.root, child)}`);
     }
     expect(messages).toContain("Dry run only. Add --apply to perform these actions.");
-    expect(messages.join("\n")).toContain("Revoke the PAT in GitHub separately.");
+    expect(messages.join("\n")).toContain("Revoke remote service credentials separately.");
     expect(executeMock).not.toHaveBeenCalled();
     expect(await readdir(paths.root)).toEqual(before);
     await expectRuntimeIntact();

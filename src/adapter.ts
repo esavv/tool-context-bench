@@ -14,6 +14,8 @@ export interface PreparedAgent {
   cwd: string;
   env: NodeJS.ProcessEnv;
   args: string[];
+  promptArgument?: boolean;
+  collectWithoutSession?: boolean;
   configPath: string;
   dataPath: string;
   dataKind: "sqlite" | "jsonl";

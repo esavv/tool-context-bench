@@ -10,10 +10,11 @@ import { redact } from "./credentials.js";
 import { EventCollector } from "./events.js";
 import { MCP_URL, type Catalog } from "./github.js";
 import { execute, minimalEnvironment } from "./process.js";
+import { suiteBinDirectory, suiteServers, type SuiteCredentials } from "./suite.js";
 import { mcpHeaders } from "./techniques.js";
-import type { Trial } from "./types.js";
+import type { Benchmark, Trial } from "./types.js";
 
-function claudeEnvironment(): NodeJS.ProcessEnv {
+function claudeEnvironment(toolSearch = false): NodeJS.ProcessEnv {
   return {
     ...minimalEnvironment(),
     HOME: process.env.HOME ?? homedir(),
@@ -22,7 +23,7 @@ function claudeEnvironment(): NodeJS.ProcessEnv {
     ...(process.env.CLAUDE_CONFIG_DIR === undefined
       ? {}
       : { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR }),
-    ENABLE_TOOL_SEARCH: "false",
+    ENABLE_TOOL_SEARCH: toolSearch ? "true" : "false",
     MCP_DISCOVERY_CACHE: "0",
     CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
@@ -109,6 +110,8 @@ export class ClaudeCollector {
     private readonly catalog: Catalog | undefined,
     private readonly token: string,
     sessionID: string,
+    benchmark: Benchmark = "github",
+    private readonly extraSecrets: string[] = [],
   ) {
     this.events = new EventCollector(
       config,
@@ -116,6 +119,8 @@ export class ClaudeCollector {
       catalog?.names ?? [],
       token,
       catalog?.readOnlyNames ?? [],
+      benchmark,
+      extraSecrets,
     );
     this.events.sessionID = sessionID;
   }
@@ -163,8 +168,8 @@ export class ClaudeCollector {
         type: "tool_use",
         sessionID: this.events.sessionID,
         part: {
-          id: redact(id, [this.token]),
-          tool: redact(tool.name, [this.token]),
+          id: redact(id, [this.token, ...this.extraSecrets]),
+          tool: redact(tool.name, [this.token, ...this.extraSecrets]),
           state: { status: failed ? "error" : "completed", input: { command: tool.command } },
         },
       }),
@@ -212,7 +217,9 @@ export class ClaudeCollector {
       const expected =
         this.trial.technique === "bash"
           ? ["Bash"]
-          : (this.catalog?.names ?? []).map((name) => name.replace(/^github_/, "mcp__github__"));
+          : this.trial.technique === "tool-search"
+            ? ["ToolSearch"]
+            : (this.catalog?.names ?? []).map((name) => name.replace(/^([^_]+)_/, "mcp__$1__"));
       const tools = Array.isArray(event.tools) ? event.tools : [];
       if (
         !Array.isArray(event.tools) ||
@@ -223,7 +230,7 @@ export class ClaudeCollector {
       }
       for (const name of tools) {
         if (typeof name !== "string") continue;
-        if (/tool.?search/i.test(name)) {
+        if (/tool.?search/i.test(name) && this.trial.technique !== "tool-search") {
           this.events.invalidRoute = true;
           this.warn("Claude tool search was observed despite being disabled.");
         }
@@ -249,7 +256,7 @@ export class ClaudeCollector {
             (name) =>
               this.trial.technique === "bash" ||
               typeof name !== "string" ||
-              !name.startsWith("mcp__github__"),
+              !name.startsWith("mcp__"),
           )
         ) {
           this.warn("Claude init reported unexpected slash commands.");
@@ -263,7 +270,7 @@ export class ClaudeCollector {
         for (const value of event.mcp_servers) {
           const server = object(value);
           if (
-            server.name !== "github" ||
+            !["github", "supabase", "cloudflare", "stripe"].includes(String(server.name)) ||
             this.trial.technique === "bash" ||
             server.status !== "connected"
           )
@@ -273,7 +280,11 @@ export class ClaudeCollector {
       if (this.trial.technique !== "bash" && !this.catalog?.names.length)
         this.warn("Claude MCP catalog is missing.");
       if (!this.incomplete)
-        this.warnings.add("Claude init confirmed the eager tool catalog with no ToolSearch.");
+        this.warnings.add(
+          this.trial.technique === "tool-search"
+            ? "Claude init confirmed native ToolSearch with deferred MCP tools."
+            : "Claude init confirmed the eager tool catalog with no ToolSearch.",
+        );
       return;
     }
     if (event.type === "system" && /compact/.test(String(event.subtype)))
@@ -321,11 +332,14 @@ export class ClaudeCollector {
           this.warn("Claude emitted an invalid tool call.");
           continue;
         }
-        const name =
-          block.name === "Bash" ? "bash" : block.name.replace(/^mcp__github__/, "github_");
-        if (this.trial.technique === "bash" ? name !== "bash" : !this.catalog?.names.includes(name))
+        const name = block.name === "Bash" ? "bash" : block.name.replace(/^mcp__([^_]+)__/, "$1_");
+        if (
+          this.trial.technique === "bash"
+            ? name !== "bash"
+            : name !== "ToolSearch" && !this.catalog?.names.includes(name)
+        )
           this.warn("Claude called a tool outside the expected catalog.");
-        if (/tool.?search/i.test(name)) {
+        if (/tool.?search/i.test(name) && this.trial.technique !== "tool-search") {
           this.events.invalidRoute = true;
           this.warn("Claude tool search was observed despite being disabled.");
         }
@@ -342,7 +356,8 @@ export class ClaudeCollector {
           });
         }
       }
-      if (text.length) this.fallbackAnswer = redact(text.join(""), [this.token]);
+      if (text.length)
+        this.fallbackAnswer = redact(text.join(""), [this.token, ...this.extraSecrets]);
       return;
     }
     if (event.type === "user") {
@@ -366,7 +381,7 @@ export class ClaudeCollector {
       }
       this.events.answer =
         event.subtype === "success" && !this.events.error && typeof event.result === "string"
-          ? redact(event.result, [this.token])
+          ? redact(event.result, [this.token, ...this.extraSecrets])
           : this.fallbackAnswer;
       if (typeof event.result !== "string") this.warn("Claude final answer was missing.");
       if (Array.isArray(event.permission_denials) && event.permission_denials.length > 0) {
@@ -439,8 +454,9 @@ export class ClaudeCollector {
         complete: !this.incomplete && !this.events.malformed && !this.events.error,
       },
       requests: requests.map((request) => ({
-        id: redact(request.id, [this.token]),
-        model: request.model === null ? null : redact(request.model, [this.token]),
+        id: redact(request.id, [this.token, ...this.extraSecrets]),
+        model:
+          request.model === null ? null : redact(request.model, [this.token, ...this.extraSecrets]),
         ...totals(request.usage),
         complete:
           request.stopped &&
@@ -450,7 +466,9 @@ export class ClaudeCollector {
       models: [
         ...new Set(
           requests.flatMap((request) =>
-            request.model === null ? [] : [redact(request.model, [this.token])],
+            request.model === null
+              ? []
+              : [redact(request.model, [this.token, ...this.extraSecrets])],
           ),
         ),
       ],
@@ -465,6 +483,8 @@ export async function prepareClaude(
   trial: Trial,
   catalog: Catalog | undefined,
   token: string,
+  benchmark: Benchmark = "github",
+  credentials?: SuiteCredentials,
 ): Promise<PreparedAgent> {
   config = configSchema.parse(config);
   if (trial.agent !== "claude") throw new Error("Expected a Claude trial.");
@@ -501,13 +521,24 @@ export async function prepareClaude(
         mcpServers:
           trial.technique === "bash"
             ? {}
-            : {
-                github: {
-                  type: "http",
-                  url: MCP_URL,
-                  headers: mcpHeaders(trial.technique, "${BENCH_GITHUB_TOKEN}"),
+            : benchmark === "suite" && credentials
+              ? Object.fromEntries(
+                  Object.entries(
+                    suiteServers(config, trial.technique, {
+                      github: "${BENCH_GITHUB_TOKEN}",
+                      supabase: "${BENCH_SUPABASE_TOKEN}",
+                      cloudflare: "${BENCH_CLOUDFLARE_TOKEN}",
+                      stripe: "${BENCH_STRIPE_TOKEN}",
+                    }),
+                  ).map(([name, server]) => [name, { type: "http", ...server }]),
+                )
+              : {
+                  github: {
+                    type: "http",
+                    url: MCP_URL,
+                    headers: mcpHeaders(trial.technique, "${BENCH_GITHUB_TOKEN}"),
+                  },
                 },
-              },
       },
       null,
       2,
@@ -516,7 +547,15 @@ export async function prepareClaude(
   );
   const profile = agentProfile(config, "claude");
   const sessionID = randomUUID();
-  const collector = new ClaudeCollector(config, trial, catalog, token, sessionID);
+  const collector = new ClaudeCollector(
+    config,
+    trial,
+    catalog,
+    token,
+    sessionID,
+    benchmark,
+    credentials ? Object.values(credentials) : [],
+  );
   // Match the other harnesses' CLI surface; the restricted PAT remains the remote write boundary.
   const allowed =
     trial.technique === "bash"
@@ -528,8 +567,25 @@ export async function prepareClaude(
           "Bash(gh help api)",
           "Bash(gh help repo)",
           "Bash(gh api --help)",
+          ...(benchmark === "suite"
+            ? [
+                "Bash(supabase functions list *)",
+                "Bash(wrangler d1 list *)",
+                "Bash(stripe webhook_endpoints list *)",
+              ]
+            : []),
         ]
-      : ["mcp__github__*"];
+      : trial.technique === "tool-search"
+        ? [
+            "ToolSearch",
+            "mcp__github__*",
+            "mcp__supabase__*",
+            "mcp__cloudflare__*",
+            "mcp__stripe__*",
+          ]
+        : benchmark === "suite"
+          ? ["mcp__github__*", "mcp__supabase__*", "mcp__cloudflare__*", "mcp__stripe__*"]
+          : ["mcp__github__*"];
   return {
     directory,
     cwd,
@@ -537,13 +593,31 @@ export async function prepareClaude(
     dataPath,
     dataKind: "jsonl",
     env: {
-      ...claudeEnvironment(),
+      ...claudeEnvironment(trial.technique === "tool-search"),
+      ...(benchmark === "suite"
+        ? { PATH: `${suiteBinDirectory}:${claudeEnvironment().PATH}` }
+        : {}),
       TMPDIR: join(directory, "tmp"),
       PWD: cwd,
       GH_CONFIG_DIR: join(directory, "gh"),
       GH_PROMPT_DISABLED: "1",
       GH_HOST: "github.com",
       ...(trial.technique === "bash" ? { GH_TOKEN: token } : { BENCH_GITHUB_TOKEN: token }),
+      ...(credentials
+        ? {
+            BENCH_SUPABASE_TOKEN: credentials.supabase,
+            BENCH_CLOUDFLARE_TOKEN: credentials.cloudflare,
+            BENCH_STRIPE_TOKEN: credentials.stripe,
+            ...(trial.technique === "bash"
+              ? {
+                  SUPABASE_ACCESS_TOKEN: credentials.supabase,
+                  CLOUDFLARE_API_TOKEN: credentials.cloudflare,
+                  CLOUDFLARE_ACCOUNT_ID: config.suite?.cloudflare.accountId,
+                  STRIPE_API_KEY: credentials.stripe,
+                }
+              : {}),
+          }
+        : {}),
     },
     args: [
       "--setting-sources",
@@ -554,7 +628,7 @@ export async function prepareClaude(
       "--mcp-config",
       mcpPath,
       "--tools",
-      trial.technique === "bash" ? "Bash" : "",
+      trial.technique === "bash" ? "Bash" : trial.technique === "tool-search" ? "ToolSearch" : "",
       "--allowedTools",
       ...allowed,
       "--permission-mode",
@@ -586,7 +660,9 @@ export async function prepareClaude(
       "Fresh work, temporary, and GitHub config directories; original HOME and CLAUDE_CONFIG_DIR preserve the stored subscription login.",
       "Shared Claude app state remains in use. Settings sources are empty; explicit settings disable hooks, plugins, and auto memory; CLAUDE.md discovery is disabled. Managed policy can still apply.",
       "No login copies, new Keychain, API keys, or bare mode. Existing global app state and subscription auth can refresh or change during a run.",
-      "Strict explicit MCP config; eager tools with ENABLE_TOOL_SEARCH=false and MCP_DISCOVERY_CACHE=0. Init must include all expected tools and no ToolSearch; runtime evidence is checked by the collector.",
+      trial.technique === "tool-search"
+        ? "Strict explicit MCP config; native ToolSearch enabled with MCP_DISCOVERY_CACHE=0. Init and runtime evidence are checked by the collector."
+        : "Strict explicit MCP config; eager tools with ENABLE_TOOL_SEARCH=false and MCP_DISCOVERY_CACHE=0. Init must include all expected tools and no ToolSearch; runtime evidence is checked by the collector.",
       "Terminal title, background tasks, nonessential traffic, updates, and compaction are disabled; permission prompts, slash commands, suggestions, and Chrome are disabled.",
       "Native stream-json stdout is captured as redacted JSONL by the runner, not SQLite. Session persistence is disabled; no daily transcript cleanup is performed.",
     ],

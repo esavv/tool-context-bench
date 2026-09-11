@@ -8,6 +8,8 @@
   "claudeModel": "claude-sonnet-5",
   "codexVersion": "0.153.3",
   "codexModel": "gpt-5.6-terra",
+  "piVersion": "0.85.1",
+  "piModel": "openai-codex/gpt-5.6-terra",
   "variant": "medium",
   "repeats": 3,
   "timeoutSeconds": 180,

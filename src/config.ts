@@ -16,6 +16,8 @@ export const configSchema = z.strictObject({
   claudeModel: z.literal("claude-sonnet-5").default("claude-sonnet-5"),
   codexVersion: z.literal("0.153.3").default("0.153.3"),
   codexModel: z.literal("gpt-5.6-terra").default("gpt-5.6-terra"),
+  piVersion: z.literal("0.85.1").default("0.85.1"),
+  piModel: z.literal("openai-codex/gpt-5.6-terra").default("openai-codex/gpt-5.6-terra"),
   variant: z.enum(["low", "medium", "high"]).default("medium"),
   repeats: z.number().int().min(1).max(10).default(3),
   timeoutSeconds: z.number().int().min(10).max(600).default(180),

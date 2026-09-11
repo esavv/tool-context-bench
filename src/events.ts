@@ -3,6 +3,7 @@ import { z } from "zod";
 import { redact } from "./credentials.js";
 import type { Config } from "./config.js";
 import type { Result, Trial } from "./types.js";
+import type { Benchmark } from "./types.js";
 
 const object = z.record(z.string(), z.unknown());
 const eventSchema = z.object({
@@ -98,6 +99,49 @@ export function approvedCommand(command: string, repository: string): boolean {
   }
 }
 
+export function approvedSuiteCommand(command: string, repository: string): boolean {
+  if (approvedCommand(command, repository)) return true;
+  if (
+    command.length > 16_000 ||
+    command.includes("\n") ||
+    command.includes("`") ||
+    /[;&<>]/.test(command)
+  )
+    return false;
+  try {
+    const words = parse(command, () => {
+      throw new Error("Expansion is not permitted.");
+    });
+    const segments: string[][] = [[]];
+    for (const word of words) {
+      if (typeof word === "string") segments.at(-1)?.push(word);
+      else if ("op" in word && word.op === "|") segments.push([]);
+      else return false;
+    }
+    return segments.every((args, index) => {
+      const executable = args[0]?.split("/").at(-1);
+      if (index > 0) return executable === "jq" || executable === "wc";
+      if (executable === "supabase")
+        return (
+          args[1] === "functions" &&
+          args[2] === "list" &&
+          args.slice(3).every((arg) => !/^(?:--debug|--create-ticket)$/.test(arg))
+        );
+      if (executable === "wrangler")
+        return (
+          args[1] === "d1" &&
+          args[2] === "list" &&
+          args.slice(3).every((arg) => ["--json"].includes(arg))
+        );
+      if (executable === "stripe")
+        return args[1] === "webhook_endpoints" && args[2] === "list" && !args.includes("--live");
+      return false;
+    });
+  } catch {
+    return false;
+  }
+}
+
 export class EventCollector {
   sessionID: string | null = null;
   answer = "";
@@ -116,6 +160,8 @@ export class EventCollector {
     private readonly names: string[],
     private readonly token: string,
     private readonly readOnlyNames: string[] = names,
+    private readonly benchmark: Benchmark = "github",
+    private readonly extraSecrets: string[] = [],
   ) {}
 
   line(line: string): void {
@@ -153,7 +199,7 @@ export class EventCollector {
       partID: id,
     });
     if (event.type === "text" && typeof part.text === "string")
-      this.answer += redact(part.text, [this.token]);
+      this.answer += redact(part.text, [this.token, ...this.extraSecrets]);
     if (event.type !== "tool_use" || typeof part.tool !== "string") return;
     const name = part.tool;
     const state = object.safeParse(part.state);
@@ -173,8 +219,14 @@ export class EventCollector {
       this.invalidRoute ||=
         name !== "bash" ||
         command === undefined ||
-        !approvedCommand(command, this.config.repository);
-    else {
+        !(this.benchmark === "suite"
+          ? approvedSuiteCommand(command, this.config.repository)
+          : approvedCommand(command, this.config.repository));
+    else if (this.trial.technique === "tool-search" && /^(?:ToolSearch|tool_search)$/.test(name)) {
+      // Discovery is expected in this condition; service calls are checked below.
+    } else if (this.trial.technique === "tool-search" && name === "execute") {
+      this.codeMode = true;
+    } else {
       this.invalidRoute ||= !this.names.includes(name) || !this.readOnlyNames.includes(name);
       if (!this.readOnlyNames.includes(name))
         this.warnings.push(
@@ -184,6 +236,31 @@ export class EventCollector {
   }
 
   get routeValid(): boolean {
+    if (this.benchmark === "suite" && this.trial.workload === "task") {
+      const completed = this.tools.filter((tool) => tool.status === "completed");
+      if (this.trial.technique === "bash") {
+        const commands = completed.flatMap((tool) => (tool.command ? [tool.command] : []));
+        return (
+          !this.invalidRoute &&
+          !this.malformed &&
+          ["gh", "supabase", "wrangler", "stripe"].every((name) =>
+            commands.some((command) => command.split(/\s+/)[0]?.split("/").at(-1) === name),
+          )
+        );
+      }
+      if (
+        this.trial.technique === "tool-search" &&
+        completed.some((tool) => tool.name === "execute")
+      )
+        return !this.invalidRoute && !this.malformed;
+      return (
+        !this.invalidRoute &&
+        !this.malformed &&
+        ["github_", "supabase_", "cloudflare_", "stripe_"].every((prefix) =>
+          completed.some((tool) => tool.name.startsWith(prefix)),
+        )
+      );
+    }
     return (
       !this.invalidRoute &&
       !this.malformed &&
