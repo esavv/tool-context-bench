@@ -8,6 +8,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
 import { configSchema, runtimePaths } from "../src/config.js";
 import {
+  mcpStartupError,
   opencode2Auth,
   parseOpencode2Usage,
   prepareOpencode2,
@@ -15,6 +16,21 @@ import {
 } from "../src/opencode2.js";
 import { execute } from "../src/process.js";
 import type { Technique, Trial } from "../src/types.js";
+
+it("allows MCP servers to connect at different times", () => {
+  expect(
+    mcpStartupError(
+      [
+        { name: "github", status: { status: "connected" } },
+        { name: "supabase", status: { status: "pending" } },
+      ],
+      false,
+    ),
+  ).toBeNull();
+  expect(mcpStartupError([{ name: "supabase", status: { status: "failed" } }], false)).toContain(
+    "supabase=failed",
+  );
+});
 
 const login = vi.hoisted(
   (): { code: number; signal: NodeJS.Signals | null; error: boolean; persist: boolean } => ({

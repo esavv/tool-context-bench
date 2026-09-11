@@ -47,6 +47,20 @@ const tokenSchema = z.object({
     .catch({ read: null, write: null }),
 });
 
+export function mcpStartupError(
+  status: { name: string; status: { status: string } }[],
+  timedOut: boolean,
+): string | null {
+  const summary = status
+    .map((server) => `${server.name}=${server.status.status}`)
+    .sort()
+    .join(", ");
+  if (status.some((server) => !["pending", "connected"].includes(server.status.status)))
+    return `OpenCode 2 MCP service failed: ${summary}.`;
+  if (timedOut) return `OpenCode 2 MCP services timed out: ${summary}.`;
+  return null;
+}
+
 function isolatedEnvironment(runtime: string, databasePath: string): NodeJS.ProcessEnv {
   return {
     ...minimalEnvironment(),
@@ -544,8 +558,8 @@ async function startMcpServer(
       )
         throw new Error("Unexpected OpenCode 2 MCP server inventory.");
       if (status.every((server) => server.status.status === "connected")) break;
-      if (status.some((server) => server.status.status !== "pending") || Date.now() > deadline)
-        throw new Error("OpenCode 2 MCP services did not connect.");
+      const problem = mcpStartupError(status, Date.now() > deadline);
+      if (problem) throw new Error(problem);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     // Upstream McpTool uses a 100ms debounce. The context guard below verifies the
