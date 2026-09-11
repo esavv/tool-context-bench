@@ -225,41 +225,78 @@ export async function readSuiteExpected(
       cwd: home,
     }),
   ]);
-  if (
-    [supabaseResult, cloudflareResult, stripeResult].some(
-      (result) => result.code !== 0 || result.stopped,
-    )
-  )
-    throw new Error("A suite fixture read failed.");
+  for (const [service, result] of Object.entries({
+    Supabase: supabaseResult,
+    Cloudflare: cloudflareResult,
+    Stripe: stripeResult,
+  }))
+    if (result.code !== 0 || result.stopped)
+      throw new Error(`${service} fixture read failed. Check its credential and remote access.`);
+  return parseSuiteExpected(
+    config,
+    github,
+    supabaseResult.stdout,
+    cloudflareResult.stdout,
+    stripeResult.stdout,
+  );
+}
+
+function parseResponse<T>(label: string, schema: z.ZodType<T>, text: string): T {
   try {
-    const functions = z
-      .array(z.record(z.string(), z.unknown()))
-      .parse(JSON.parse(supabaseResult.stdout));
-    const fn = functions.find(
-      (item) =>
-        item.id === suite.supabase.edgeFunctionId && item.slug === suite.supabase.edgeFunctionSlug,
-    );
-    const databases = z
-      .array(z.record(z.string(), z.unknown()))
-      .parse(JSON.parse(cloudflareResult.stdout));
-    const database = databases.find((item) => item.uuid === suite.cloudflare.d1DatabaseId);
-    const stripe = z
-      .object({ data: z.array(z.record(z.string(), z.unknown())) })
-      .parse(JSON.parse(stripeResult.stdout));
-    const endpoint = stripe.data.find((item) => item.id === suite.stripe.webhookEndpointId);
+    return schema.parse(JSON.parse(text));
+  } catch {
+    throw new Error(`${label} returned an unexpected fixture response.`);
+  }
+}
+
+export function parseSuiteExpected(
+  config: Config,
+  github: SuiteExpected["github"],
+  supabaseText: string,
+  cloudflareText: string,
+  stripeText: string,
+): SuiteExpected {
+  const suite = config.suite;
+  if (!suite) throw new Error("The suite configuration is missing.");
+  const supabase = parseResponse(
+    "Supabase",
+    z.object({ functions: z.array(z.record(z.string(), z.unknown())) }),
+    supabaseText,
+  );
+  const fn = supabase.functions.find(
+    (item) =>
+      item.id === suite.supabase.edgeFunctionId && item.slug === suite.supabase.edgeFunctionSlug,
+  );
+  if (!fn) throw new Error("Supabase did not return the configured hello-world Edge Function.");
+  const databases = parseResponse(
+    "Cloudflare",
+    z.array(z.record(z.string(), z.unknown())),
+    cloudflareText,
+  );
+  const database = databases.find((item) => item.uuid === suite.cloudflare.d1DatabaseId);
+  if (!database)
+    throw new Error("Cloudflare did not return the configured agent-test D1 database.");
+  const stripe = parseResponse(
+    "Stripe",
+    z.object({ data: z.array(z.record(z.string(), z.unknown())) }),
+    stripeText,
+  );
+  const endpoint = stripe.data.find((item) => item.id === suite.stripe.webhookEndpointId);
+  if (!endpoint) throw new Error("Stripe did not return the configured sandbox webhook endpoint.");
+  try {
     return suiteExpectedSchema.parse({
       github,
-      supabase: { id: fn?.id, slug: fn?.slug, status: fn?.status },
+      supabase: { id: fn.id, slug: fn.slug, status: fn.status },
       cloudflare: {
-        uuid: database?.uuid,
-        name: database?.name,
-        created_at: database?.created_at,
-        version: database?.version,
+        uuid: database.uuid,
+        name: database.name,
+        created_at: database.created_at,
+        version: database.version,
       },
-      stripe: { webhook_endpoint_id: endpoint?.id, description: endpoint?.description ?? null },
+      stripe: { webhook_endpoint_id: endpoint.id, description: endpoint.description ?? null },
     });
   } catch {
-    throw new Error("Suite services returned unexpected fixture data.");
+    throw new Error("A configured suite fixture has missing or invalid fields.");
   }
 }
 
