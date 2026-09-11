@@ -20,6 +20,32 @@ export const configSchema = z.strictObject({
   timeoutSeconds: z.number().int().min(10).max(600).default(180),
   maxSteps: z.number().int().min(2).max(20).default(8),
   keychainService: z.literal("tool-context-bench.github").default("tool-context-bench.github"),
+  suite: z
+    .strictObject({
+      cliVersions: z.strictObject({
+        supabase: z.literal("2.117.0"),
+        wrangler: z.literal("4.131.1"),
+        stripe: z.literal("1.50.11"),
+      }),
+      supabase: z.strictObject({
+        projectRef: z.string().regex(/^[a-z]{20}$/),
+        edgeFunctionId: z.string().uuid(),
+        edgeFunctionSlug: z.string().min(1),
+        keychainService: z.literal("tool-context-bench.supabase"),
+      }),
+      cloudflare: z.strictObject({
+        accountId: z.string().regex(/^[a-f0-9]{32}$/),
+        d1DatabaseId: z.string().uuid(),
+        d1DatabaseName: z.literal("agent-test"),
+        keychainService: z.literal("tool-context-bench.cloudflare"),
+      }),
+      stripe: z.strictObject({
+        webhookEndpointId: z.string().regex(/^we_[A-Za-z0-9]+$/),
+        livemode: z.literal(false),
+        keychainService: z.literal("tool-context-bench.stripe"),
+      }),
+    })
+    .optional(),
 });
 export type Config = z.infer<typeof configSchema>;
 

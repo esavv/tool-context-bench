@@ -11,5 +11,29 @@
   "repeats": 3,
   "timeoutSeconds": 180,
   "maxSteps": 8,
-  "keychainService": "tool-context-bench.github"
+  "keychainService": "tool-context-bench.github",
+  "suite": {
+    "cliVersions": {
+      "supabase": "2.117.0",
+      "wrangler": "4.131.1",
+      "stripe": "1.50.11"
+    },
+    "supabase": {
+      "projectRef": "gfqzqboiybolynjtnszm",
+      "edgeFunctionId": "5bf1fdbf-0dbc-41c2-bfaa-1d5a91eb7992",
+      "edgeFunctionSlug": "hello-world",
+      "keychainService": "tool-context-bench.supabase"
+    },
+    "cloudflare": {
+      "accountId": "c02cb32b4fadd9c7ec54acac22b1727e",
+      "d1DatabaseId": "15a595ea-222c-4318-a971-3827900c7f53",
+      "d1DatabaseName": "agent-test",
+      "keychainService": "tool-context-bench.cloudflare"
+    },
+    "stripe": {
+      "webhookEndpointId": "we_1UEc3DJkEalzb2HflcWKjFS3",
+      "livemode": false,
+      "keychainService": "tool-context-bench.stripe"
+    }
+  }
 }
