@@ -650,11 +650,13 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
   const max = Math.max(0, ...rows.map((item) => item.metrics[metric].median ?? 0));
   const barCounts = (item: SummaryRow) =>
     `${item.success}/${item.tried} success · ${item.validSamples} valid · ${item.pending} pending`;
+  const chartValue = (item: SummaryRow) => {
+    const stat = item.metrics[metric];
+    return stat.n === 0 && item.tried === 0 && item.pending > 0 ? "pending" : formatted(stat.median);
+  };
   const valueWidth = Math.max(
     7,
-    ...rows.map(
-      (item) => `${formatted(item.metrics[metric].median)} n=${item.metrics[metric].n}`.length,
-    ),
+    ...rows.map((item) => `${chartValue(item)} n=${item.metrics[metric].n}`.length),
   );
   const countWidth = Math.max(0, ...rows.map((item) => barCounts(item).length));
   const agentWidth = Math.max(...agentSchema.options.map((agent) => agentLabel(agent).length));
@@ -811,7 +813,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                     </Text>{" "}
                     <Meter agent={item.agent} value={stat.median} max={max} width={barWidth} />{" "}
                     <Text {...inkColor(stat.n ? palette.white : palette.amber)}>
-                      {formatted(stat.median).padStart(valueWidth - ` n=${stat.n}`.length)}
+                      {chartValue(item).padStart(valueWidth - ` n=${stat.n}`.length)}
                       <Text {...inkColor(palette.muted)}> n={stat.n}</Text>
                     </Text>{" "}
                     <Text
