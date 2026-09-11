@@ -45,8 +45,14 @@ export async function claudeAuth(binary: string): Promise<void> {
     });
     if (result.code !== 0 || result.stopped) throw new Error();
     const raw: unknown = JSON.parse(result.stdout);
-    z.object({ loggedIn: z.literal(true), authMethod: z.literal("claude.ai") }).parse(raw);
-  } catch {
+    const status = z.object({ loggedIn: z.boolean(), authMethod: z.string() }).parse(raw);
+    if (!status.loggedIn)
+      throw new Error(
+        `Claude reports no active subscription login (loggedIn=${status.loggedIn}, authMethod=${status.authMethod}). Run claude auth login, then retry the benchmark.`,
+      );
+    if (status.authMethod !== "claude.ai") throw new Error();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Claude reports no active")) throw error;
     throw new Error(
       "Cannot confirm an existing Claude subscription login. Auth output was not displayed or exported.",
     );

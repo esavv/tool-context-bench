@@ -70,6 +70,15 @@ it("preserves subscription state without inherited API credentials and writes is
   await expect(claudeAuth("synthetic-claude")).rejects.toThrow(
     "Cannot confirm an existing Claude subscription login.",
   );
+  execute.mockResolvedValue({
+    code: 0,
+    stopped: false,
+    stdout: JSON.stringify({ loggedIn: false, authMethod: "none" }),
+    stderr: "",
+  });
+  await expect(claudeAuth("synthetic-claude")).rejects.toThrow(
+    "Claude reports no active subscription login (loggedIn=false, authMethod=none). Run claude auth login",
+  );
   const directory = await mkdtemp(join(tmpdir(), "claude-adapter-test-"));
   directories.push(directory);
   const prepared = await prepareClaude(
@@ -128,7 +137,7 @@ it("preserves subscription state without inherited API credentials and writes is
   expect(prepared.dataPath).toBe(join(prepared.directory, "claude-events.jsonl"));
   expect(prepared.dataKind).toBe("jsonl");
   await prepared.cleanup();
-  expect(execute).toHaveBeenCalledTimes(2);
+  expect(execute).toHaveBeenCalledTimes(3);
 });
 
 it("counts stream snapshots once, keeps completed usage, and joins tool results without exporting output", () => {
