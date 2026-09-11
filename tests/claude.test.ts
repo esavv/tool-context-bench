@@ -238,6 +238,30 @@ it("counts stream snapshots once, keeps completed usage, and joins tool results 
   expect(collector.collect()).toEqual(usage);
 });
 
+it("accepts Claude tool search with the complete callable MCP inventory", () => {
+  const collector = new ClaudeCollector(
+    config,
+    { ...trial, technique: "tool-search" },
+    catalog,
+    token,
+    sessionID,
+  );
+  collector.line(
+    JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: sessionID,
+      tools: ["ToolSearch", "mcp__github__get_commit"],
+      mcp_servers: [{ name: "github", status: "connected" }],
+    }),
+  );
+  const usage = collector.collect();
+  expect(usage.warnings).toContain(
+    "Claude init confirmed native ToolSearch and the expected MCP callable inventory.",
+  );
+  expect(usage.warnings).not.toContain("Claude init tools did not match the expected route catalog.");
+});
+
 it("marks unexpected discovery and missing requests incomplete, reconciles totals, and fails pending MCP calls", () => {
   const collector = new ClaudeCollector(
     config,

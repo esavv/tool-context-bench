@@ -220,19 +220,22 @@ export class ClaudeCollector {
     }
     if (event.type === "system" && event.subtype === "init") {
       this.initialized = true;
+      const catalogTools = (this.catalog?.names ?? []).map((name) =>
+        name.replace(/^([^_]+)_/, "mcp__$1__"),
+      );
       const expected =
         this.trial.technique === "bash"
           ? ["Bash"]
           : this.trial.technique === "tool-search"
-            ? ["ToolSearch"]
-            : (this.catalog?.names ?? []).map((name) => name.replace(/^([^_]+)_/, "mcp__$1__"));
+            ? ["ToolSearch", ...catalogTools]
+            : catalogTools;
       const tools = Array.isArray(event.tools) ? event.tools : [];
       if (
         !Array.isArray(event.tools) ||
         expected.some((name) => !tools.includes(name)) ||
         tools.some((name) => typeof name !== "string" || !expected.includes(name))
       ) {
-        this.warn("Claude init tools did not match the complete eager tool catalog.");
+        this.warn("Claude init tools did not match the expected route catalog.");
       }
       for (const name of tools) {
         if (typeof name !== "string") continue;
@@ -288,7 +291,7 @@ export class ClaudeCollector {
       if (!this.incomplete)
         this.warnings.add(
           this.trial.technique === "tool-search"
-            ? "Claude init confirmed native ToolSearch with deferred MCP tools."
+            ? "Claude init confirmed native ToolSearch and the expected MCP callable inventory."
             : "Claude init confirmed the eager tool catalog with no ToolSearch.",
         );
       return;
