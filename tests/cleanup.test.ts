@@ -53,13 +53,14 @@ beforeEach(async () => {
     results: join(root, "results"),
     marker: join(root, "ownership.json"),
     lock: join(root, "run.lock"),
+    opencode2Database: join(root, "opencode2", "opencode.db"),
     account: "synthetic-account with spaces",
     auth: join(temporary, "outside", "auth.json"),
   };
   await mkdir(join(temporary, "outside"));
   await writeFile(paths.auth, authContents, { mode: 0o600 });
   await ensureRoot(paths);
-  for (const child of ["attempts", "results", "probe"]) {
+  for (const child of ["attempts", "results", "probe", "opencode2"]) {
     const directory = join(root, child);
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, "keep-until-cleanup.txt"), child);
@@ -79,7 +80,7 @@ afterEach(async () => {
 });
 
 async function expectRuntimeIntact(): Promise<void> {
-  for (const child of ["attempts", "results", "probe"]) {
+  for (const child of ["attempts", "results", "probe", "opencode2"]) {
     expect(await readFile(join(paths.root, child, "keep-until-cleanup.txt"), "utf8")).toBe(child);
   }
   for (const child of ["attempts", "probe"]) {
@@ -237,7 +238,7 @@ describe("cleanup", () => {
         runtime: true,
         apply: true,
       });
-      for (const child of ["attempts", "results", "probe"]) {
+      for (const child of ["attempts", "results", "probe", "opencode2"]) {
         await expect(lstat(join(paths.root, child))).rejects.toMatchObject({ code: "ENOENT" });
       }
       expect(messages.join("\n")).toContain("Shared OpenCode auth is not deleted.");
@@ -252,7 +253,7 @@ describe("cleanup", () => {
     expect(executeMock).not.toHaveBeenCalled();
   });
 
-  it.each(["attempts", "results", "probe"])(
+  it.each(["attempts", "results", "probe", "opencode2"])(
     "unlinks a top-level %s symlink without following it",
     async (child) => {
       const directory = join(paths.root, child);

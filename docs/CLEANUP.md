@@ -8,7 +8,7 @@ After installing the direct command with `npm link`, run `tcb` commands from any
 
 1. Stop the benchmark and access checks. Avoid concurrent use of the same agent login while an attempt uses shared subscription auth.
 2. Inspect the latest batch, including failures, pending sessions, expected SHA, tool routes, and usage warnings. Do not rerun until you understand the result.
-3. Export or back up the records you need outside the runtime root. Runtime result deletion is irreversible from this app.
+3. Export or back up the sanitized records you need outside the runtime root. Runtime deletion is irreversible from this app and includes the OpenCode 2 benchmark profile, local OAuth credentials, and sessions. Do not back up its credential/session database with reports.
 4. If retiring the benchmark PAT, revoke it in GitHub settings separately. Then preview and apply local credential cleanup.
 
 Inspect saved results without model calls:
@@ -30,12 +30,12 @@ tcb export latest --format json > "$HOME/tool-context-bench-export.json"
 
 Inspect both files before deletion. CSV includes summary and attempt rows. JSON includes the manifest and result records. These reports do not contain every saved catalog, event, or request record. If you need that evidence, back up the relevant sanitized JSON files from `results/<batch-id>/` separately. Do not treat a native SQLite database or OpenCode log as sanitized.
 
-Do not copy OAuth tokens or the shared auth store into a results backup. Keep any separately managed credentials separate from reports. Never put literal tokens in commands, documents, or export names.
+Do not copy OAuth tokens or a shared auth store into a results backup. OpenCode 2's `<root>/opencode2/opencode.db` and SQLite sidecars contain credentials as well as sessions; never copy them into artifacts or report backups. Use its collected private `usage.jsonl` and sanitized result records instead. Keep any separately managed credentials separate from reports. Never put literal tokens in commands, documents, or export names.
 
 Exports and backups outside the runtime root are user-managed. The app does not find or delete them. Sanitization can still leave private repository information. Review the content before sharing it.
 
 **Credential Scope**
-The only supported local credential target is a Keychain **generic password** with:
+The only target of `--credentials` is the GitHub PAT Keychain **generic password** with:
 
 | Field   | Exact value                                        |
 | ------- | -------------------------------------------------- |
@@ -50,10 +50,12 @@ security add-generic-password -a "$USER" -s "tool-context-bench.github" -w
 
 This is a record of the setup command, not a cleanup step. Do not repeat it for an existing item. The final `-w` prompts for the secret; `$USER` must match the OS account used by cleanup.
 
-The runner only reads this credential into memory and supplies it to GitHub requests. It does not print the value or create other generic-password items. There is no current general credential registry. Before any future service credential is provisioned, its exact target and cleanup procedure must be registered in the app's cleanup support and documentation.
+The runner only reads this credential into memory and supplies it to GitHub requests. It does not print the value or create other generic-password items. OpenCode 2 local OAuth belongs to `--runtime`, not `--credentials`, because its benchmark database also stores sessions. There is no current general credential registry. Before any future service credential is provisioned, its exact target and cleanup procedure must be registered in the app's cleanup support and documentation.
 
 **Remote Revocation**
 Deleting the Keychain item does **not** revoke the PAT. It removes one local copy only. Other copies can retain authority until GitHub revokes or expires the token.
+
+Deleting the OpenCode 2 runtime profile likewise removes only local OAuth state and sessions. It does not revoke the remote ChatGPT OAuth grant. Neither cleanup scope performs remote revocation; manage any required grant revocation separately with the provider.
 
 In GitHub Settings, open Developer settings, then Personal access tokens. Select the benchmark PAT in the applicable token list and revoke it. Confirm the correct token before you act. The app does not perform this step or verify remote revocation.
 
@@ -78,17 +80,22 @@ The same rule applies to personal Claude and Codex credentials. The benchmark re
 **Runtime Scope**
 Runtime cleanup requires a recognized `ownership.json` marker with owner `tool-context-bench/v1`. The root must not be a symlink. Cleanup removes only these known children:
 
-| Child       | Removed data                                                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `attempts/` | Isolated homes, config, prompts, native databases and logs, temporary files, redacted stderr, and remaining auth symlinks |
-| `results/`  | All saved batches, manifests, catalogs, result records, events, request usage, and summaries                              |
-| `probe/`    | Local GitHub preflight files                                                                                              |
+| Child        | Removed data                                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `attempts/`  | Isolated homes, config, prompts, native databases and logs, temporary files, redacted stderr, and remaining auth symlinks                                    |
+| `results/`   | All saved batches, manifests, catalogs, result records, events, request usage, and summaries                                                                 |
+| `probe/`     | Local GitHub preflight files                                                                                                                                 |
+| `opencode2/` | Benchmark-only OpenCode 2 profile: persistent `opencode.db`, SQLite sidecars, local OAuth credentials, sessions, and private HOME/XDG/config/work/temp state |
 
 The root directory and `ownership.json` are retained. Unrelated children are not cleanup targets. The cleanup lock is released on normal completion. This is not a recursive deletion of the root itself.
 
-The attempt's `data/opencode/auth.json` is a symlink to the original OpenCode auth file. Normal completion removes the link. Directory removal does not follow that symlink, so cleanup does not remove the original auth store. Routine subscription refresh can already have updated that shared original file; cleanup does not undo refresh.
+The OpenCode 1 attempt's `data/opencode/auth.json` is a symlink to the original OpenCode 1 auth file. Normal completion removes the link. Directory removal does not follow that symlink, so cleanup does not remove the original auth store. Routine subscription refresh can already have updated that shared original file; cleanup does not undo refresh.
 
-The source auth file defaults to `$XDG_DATA_HOME/opencode/auth.json`, or `~/.local/share/opencode/auth.json` when `XDG_DATA_HOME` is unset. The existing global `--auth-file <path>` option can select a different source. None of these source auth files is a cleanup target.
+The source auth file defaults to `$XDG_DATA_HOME/opencode/auth.json`, or `~/.local/share/opencode/auth.json` when `XDG_DATA_HOME` is unset. The global `--auth-file <path>` option selects a different source for OpenCode 1 only; it does not apply to OpenCode 2. None of these source auth files is a cleanup target.
+
+The user explicitly chose a separate benchmark OpenCode 2 OAuth login because beta credentials and sessions share one database. Reusing the personal migrated login would require session and refresh writes to the personal database. The new `tcb auth-opencode2` command instead uses supported device login, `opencode2 auth login openai --standalone --method chatgpt-headless`, with private isolated directories and `<root>/opencode2/opencode.db`. It copies neither personal tokens nor settings. This is an explicit exception to per-attempt databases: attempts have fresh private directories and sessions, but share the persistent benchmark credential/session database. Normal attempt cleanup retains it and completed sessions as accounting evidence.
+
+`cleanup --runtime` deletes that entire benchmark profile and local OAuth state, not personal OpenCode configuration, migrated credentials, or sessions. To run OpenCode 2 again after deletion, perform a new explicit `tcb auth-opencode2` login using the same root. `cleanup --credentials` alone leaves this profile intact.
 
 Codex attempts have a private home with an `auth.json` link to the original `$CODEX_HOME/auth.json` or `~/.codex/auth.json`. Normal completion removes the link; recursive runtime removal does not follow it. Generated Codex model descriptors, descriptor hashes, configs, SQLite indexes, and rollout JSONL files are inside the owned attempt directory and are removed by runtime cleanup.
 
@@ -126,7 +133,11 @@ Cleanup does not delete the GitHub repository `esavv/agent-test`, change its bra
 Local file deletion is not guaranteed secure erasure. Time Machine, filesystem snapshots, external backups, exported reports, and separately saved token copies can remain. The app cannot guarantee their removal. Manage those copies separately under your own retention policy.
 
 **Verification Status**
-The GitHub smoke test has completed; live credential deletion has not been performed. These are cleanup instructions, not a record of revocation or deletion. After applying cleanup, inspect its output and the remaining local items. Confirm remote revocation independently in GitHub settings.
+The original GitHub smoke test has completed. OpenCode 2 adapter, runner/TUI, private device-auth command, and cleanup integration are implemented. Initial checks passed September 11, 2026 at 13:00 EDT (UTC-04:00); the first user batch later exposed collector and MCP startup defects. The fixes passed type checking, all 340 existing tests in 8 files, lint, format checking, and build at 15:30 EDT.
+
+Native beta diagnostics accepted isolated login and bash configurations and exposed `chatgpt-headless`, without credentials, sessions, model calls, or remote MCP connections. `debug config` does not support `--standalone`; its isolated temporary managed services were stopped afterward. The built two-agent plan confirmed distinct OpenCode 1/2 profiles and two planned sessions, not executed sessions. The OpenCode 2 doctor matched the installed pin and correctly stopped with missing-login setup instructions; auth-command help passed. See [OpenCode 2 Local Verification](../IMPLEMENTATION_PLAN.md#opencode-2-local-verification) for details.
+
+The user has since logged in and attempted three v2 trials. The fix investigation read their usage without changing saved results and checked all three MCP tool inventories without provider generation. MCP attempts now own a private stdio-leased server and stop it during attempt cleanup; they do not use the personal background service. No real credential deletion or remote revocation was performed. These cleanup instructions are not evidence of real credential deletion. After applying cleanup, inspect its output and the remaining local items. Confirm any remote revocation independently with the provider.
 
 **Remove The Command**
 After any exports and cleanup, remove the global command link if you no longer need it:

@@ -6,19 +6,22 @@ import { join } from "node:path";
 import { execute } from "./process.js";
 import type { Manifest } from "./types.js";
 
-export const agentSchema = z.enum(["claude", "codex", "opencode"]);
+export const agentSchema = z.enum(["claude", "codex", "opencode", "opencode2"]);
 export type Agent = z.infer<typeof agentSchema>;
+export const defaultAgents: Agent[] = ["claude", "codex", "opencode"];
 
 export function agentProfile(config: Config, agent: Agent) {
   if (agent === "claude")
     return { version: config.claudeVersion, model: config.claudeModel, variant: config.variant };
   if (agent === "codex")
     return { version: config.codexVersion, model: config.codexModel, variant: config.variant };
+  if (agent === "opencode2")
+    return { version: config.opencode2Version, model: config.model, variant: config.variant };
   return { version: config.opencodeVersion, model: config.model, variant: config.variant };
 }
 
 export function agentLabel(agent: Agent): string {
-  return agent === "claude" ? "Claude Code" : agent === "codex" ? "Codex" : "OpenCode";
+  return agent;
 }
 
 export async function binaries(config: Config, selected: Agent[]) {
@@ -58,7 +61,9 @@ export async function binaries(config: Config, selected: Agent[]) {
       binary = await locate(agent);
     }
     const result = await execute(binary, ["--version"]);
-    const observed = result.stdout.match(/\b\d+\.\d+\.\d+\b/)?.[0];
+    const observed = result.stdout.match(
+      /\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/,
+    )?.[0];
     if (result.code !== 0 || observed !== profile.version)
       throw new Error(
         `${agentLabel(agent)} version mismatch: expected ${profile.version}, observed ${observed ?? "unknown"}.`,

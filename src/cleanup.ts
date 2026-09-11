@@ -65,11 +65,12 @@ export async function cleanup(
       }
     }
     if (options.runtime) {
-      for (const child of ["attempts", "results", "probe"]) {
+      for (const child of ["attempts", "results", "probe", "opencode2"]) {
         messages.push(`${options.apply ? "Remove" : "Would remove"} ${join(paths.root, child)}`);
         if (options.apply) await rm(join(paths.root, child), { recursive: true, force: true });
       }
       messages.push(
+        "The OpenCode 2 benchmark profile includes its local OAuth credentials and sessions; runtime cleanup removes both. It does not revoke the remote login.",
         "Shared OpenCode auth is not deleted. Directory removal does not follow auth symlinks.",
       );
     }

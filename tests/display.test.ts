@@ -47,6 +47,7 @@ function batch(results: Result[]): Batch {
         repository: "owner/repo",
         branch: "main",
         opencodeVersion: "1.18.30",
+        opencode2Version: "0.0.0-beta-19425",
         model: "openai/gpt-5.6-terra",
         claudeVersion: "2.1.267",
         claudeModel: "claude-sonnet-5",
@@ -210,12 +211,38 @@ describe("batch selection", () => {
     ]);
     expect(batchFields(input)).toMatchObject({
       workload: "both",
-      agents: "OpenCode",
+      agents: "opencode",
       repeats: 3,
       sessions: "2/2",
       id: input.manifest.id,
     });
-    expect(textReport(input)).toContain("OpenCode 1.18.30 | openai/gpt-5.6-terra");
+    expect(textReport(input)).toContain("opencode 1.18.30 | openai/gpt-5.6-terra");
+  });
+
+  it("keeps OpenCode 1 and 2 in separate result groups across selected batches", () => {
+    const first = batch([result("same")]);
+    const second = batch([
+      result("same", {
+        trial: {
+          id: "same",
+          agent: "opencode2",
+          technique: "bash",
+          workload: "task",
+          repetition: 1,
+        },
+        metrics: usage({ initialInput: 900 }),
+      }),
+    ]);
+    second.manifest.id = "v2";
+    second.manifest.versions = { opencode2: "0.0.0-beta-19425", gh: "2.0.0", node: "24.18.0" };
+    const combined = combineBatches([first, second], first);
+    expect(summarize(combined).map((row) => [row.agent, row.metrics.initialInput.median])).toEqual([
+      ["opencode", 100],
+      ["opencode2", 900],
+    ]);
+    expect(batchFields(combined).agents).toBe("opencode/opencode2");
+    expect(textReport(combined)).toContain("opencode2 0.0.0-beta-19425");
+    expect(csvReport(combined)).toContain("opencode2");
   });
 
   it("combines different agents and models but checks overlapping profiles and shared catalogs", () => {
@@ -251,15 +278,15 @@ describe("batch selection", () => {
     expect(selectionProblem([claude, codex])).toBeNull();
     const combined = combineBatches([claude, codex], claude);
     expect(new Set(combined.results.map((item) => item.trial.id)).size).toBe(2);
-    expect(batchFields(combined).agents).toBe("Claude Code/Codex");
+    expect(batchFields(combined).agents).toBe("claude/codex");
     const text = textReport(combined);
-    expect(text).toContain("Claude Code 2.1.267 | claude-sonnet-5");
-    expect(text).toContain("Codex 0.153.3 | gpt-5.6-terra");
+    expect(text).toContain("claude 2.1.267 | claude-sonnet-5");
+    expect(text).toContain("codex 0.153.3 | gpt-5.6-terra");
     expect(text).not.toContain("OpenCode");
     const otherClaude = structuredClone(claude);
     otherClaude.manifest.id = "other-claude";
     otherClaude.manifest.versions.claude = "different";
-    expect(selectionProblem([claude, codex, otherClaude])).toContain("Claude Code version");
+    expect(selectionProblem([claude, codex, otherClaude])).toContain("claude version");
     codex.manifest.catalogs["mcp-raw"] = { hash: "different", toolCount: 44 };
     expect(selectionProblem([claude, codex])).toContain("catalog hashes differ");
   });
@@ -425,7 +452,7 @@ describe("textReport", () => {
     expect(text).toContain("Session input (all requests): 300 (n=1); total=300");
     expect(text).toContain("Cache read: 200 (n=1); total=200");
     expect(text).toContain("Session: session-a");
-    expect(text).toContain("Agent: OpenCode");
+    expect(text).toContain("Agent: opencode");
     expect(text).toContain("Configuration:");
     expect(text).toContain("Model: openai/gpt-5.6-terra");
     expect(text).toContain("Config: /runs/a/opencode.json");

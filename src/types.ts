@@ -83,6 +83,7 @@ export const manifestSchema = z.object({
     claude: z.string().optional(),
     codex: z.string().optional(),
     opencode: z.string().optional(),
+    opencode2: z.string().optional(),
     gh: z.string(),
     node: z.string(),
   }),

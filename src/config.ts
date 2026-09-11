@@ -10,6 +10,7 @@ export const configSchema = z.strictObject({
     .min(1)
     .regex(/^[\w./-]+$/),
   opencodeVersion: z.literal("1.18.30"),
+  opencode2Version: z.literal("0.0.0-beta-19425").default("0.0.0-beta-19425"),
   model: z.literal("openai/gpt-5.6-terra"),
   claudeVersion: z.literal("2.1.267").default("2.1.267"),
   claudeModel: z.literal("claude-sonnet-5").default("claude-sonnet-5"),
@@ -61,6 +62,7 @@ export function runtimePaths(root = join(homedir(), "Benchmarks", "tool-context-
     results: resolve(root, "results"),
     marker: resolve(root, "ownership.json"),
     lock: resolve(root, "run.lock"),
+    opencode2Database: resolve(root, "opencode2", "opencode.db"),
     account: userInfo().username,
     auth: join(
       process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),

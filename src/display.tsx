@@ -348,6 +348,7 @@ const palette = {
   claude: "#d97757",
   codex: "#74d7c4",
   opencode: "#73a7ef",
+  opencode2: "#c49aef",
   key: "#dabe73",
   amber: "#dabe73",
   white: "#e2e9df",
@@ -594,7 +595,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
   const pageSize = Math.max(
     1,
     size.height -
-      3 -
+      (detail ? 2 : 3) -
       chartLegend.length -
       batchLegend.length -
       batchPageSize * batchRowLines -
@@ -643,7 +644,8 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     ),
   );
   const countWidth = Math.max(0, ...rows.map((item) => barCounts(item).length));
-  const barWidth = Math.max(1, width - 4 - 13 - valueWidth - countWidth - 3);
+  const agentWidth = Math.max(...agentSchema.options.map((agent) => agentLabel(agent).length));
+  const barWidth = Math.max(1, width - 4 - (agentWidth + 2) - valueWidth - countWidth - 3);
   const lines = (result ? details(result) : ["No attempts."]).flatMap((line) => {
     const characters = Array.from(line);
     return Array.from(
@@ -731,23 +733,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
           {completed}/{batch.manifest.schedule.length} sessions
         </Text>
       </Box>
-      <Text {...inkColor(palette.muted)} wrap="truncate-end">
-        {selectedBatches.length
-          ? profiles.map(({ agent, model }, index) => (
-              <Text key={agent}>
-                {index ? " · " : ""}
-                <Text {...inkColor(palette[agent])}>{agentLabel(agent)}</Text>{" "}
-                {safeText(
-                  model
-                    .replace(/^openai\//, "")
-                    .replace(/^claude-sonnet-5$/, "Sonnet 5")
-                    .replace(/^gpt-5\.6-terra$/, "GPT Terra"),
-                )}
-              </Text>
-            ))
-          : "Select one or more batches below."}
-        {` · ${selectedBatches.length} selected batch${selectedBatches.length === 1 ? "" : "es"}`}
-      </Text>
       <Box gap={2}>
         {workloads.map((item, index) => (
           <Text
@@ -792,7 +777,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                 return (
                   <Text key={item.agent} wrap="truncate-end">
                     <Text bold={item === row} {...inkColor(palette[item.agent])}>
-                      {item === row ? "▸" : " "} {agentLabel(item.agent).padEnd(11)}
+                      {item === row ? "▸" : " "} {agentLabel(item.agent).padEnd(agentWidth)}
                     </Text>{" "}
                     <Meter agent={item.agent} value={stat.median} max={max} width={barWidth} />{" "}
                     <Text {...inkColor(stat.n ? palette.white : palette.amber)}>
@@ -817,6 +802,24 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                 : "No batches selected. Use Space in the batch list."}
             </Text>
           )}
+          {rows.length === 0 && <Text> </Text>}
+          <Text {...inkColor(palette.muted)} wrap="truncate-end">
+            {selectedBatches.length
+              ? profiles.map(({ agent, model }, index) => (
+                  <Text key={agent}>
+                    {index ? " · " : ""}
+                    <Text {...inkColor(palette[agent])}>{agentLabel(agent)}</Text>{" "}
+                    {safeText(
+                      model
+                        .replace(/^openai\//, "")
+                        .replace(/^claude-sonnet-5$/, "Sonnet 5")
+                        .replace(/^gpt-5\.6-terra$/, "GPT Terra"),
+                    )}
+                  </Text>
+                ))
+              : "Select one or more batches below."}
+            {` · ${selectedBatches.length} selected batch${selectedBatches.length === 1 ? "" : "es"}`}
+          </Text>
         </Panel>
       )}
       {chartLegend.map((line, index) => (

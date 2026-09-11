@@ -7,7 +7,8 @@ import type { Batch, Result, Technique, Trial } from "./types.js";
 import { acquireLock, ensureRoot, saveJson } from "./storage.js";
 import { githubToken, inspectSubscription, redact } from "./credentials.js";
 import { prepareAttempt, agentConfig } from "./opencode.js";
-import { agentSchema, agentProfile, agentLabel, binaries, type Agent } from "./agents.js";
+import { defaultAgents, agentProfile, agentLabel, binaries, type Agent } from "./agents.js";
+import { opencode2Auth, prepareOpencode2 } from "./opencode2.js";
 import { claudeAuth, prepareClaude } from "./claude.js";
 import { codexAuth, prepareCodex } from "./codex.js";
 import type { AgentUsage, PreparedAgent } from "./adapter.js";
@@ -64,6 +65,7 @@ async function verifyConfig(
 async function checkAuth(agent: Agent, binary: string, paths: Paths): Promise<void> {
   if (agent === "claude") await claudeAuth(binary);
   else if (agent === "codex") await codexAuth();
+  else if (agent === "opencode2") await opencode2Auth(paths.opencode2Database);
   else await inspectSubscription(paths.auth);
 }
 
@@ -78,6 +80,16 @@ async function prepare(
 ): Promise<PreparedAgent> {
   if (trial.agent === "claude") return prepareClaude(directory, config, trial, catalog, token);
   if (trial.agent === "codex") return prepareCodex(directory, config, trial, catalog, token);
+  if (trial.agent === "opencode2")
+    return prepareOpencode2(
+      directory,
+      config,
+      trial,
+      catalog,
+      token,
+      paths.opencode2Database,
+      binary,
+    );
   const prepared = await prepareAttempt(directory, paths.auth, config, trial, catalog?.names ?? []);
   if (trial.technique === "bash") prepared.env.GH_TOKEN = token;
   else prepared.env.BENCH_GITHUB_TOKEN = token;
@@ -140,7 +152,7 @@ export async function doctor(
   config: Config,
   paths: Paths,
   checkAccess = false,
-  agents: Agent[] = agentSchema.options,
+  agents: Agent[] = defaultAgents,
 ): Promise<string[]> {
   const installed = await binaries(config, agents);
   const lines = [

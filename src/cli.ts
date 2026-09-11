@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { loadConfig, runtimePaths } from "./config.js";
 import { techniqueSchema } from "./types.js";
-import { agentSchema, agentProfile, agentLabel } from "./agents.js";
-import { loadBatch, loadBatchHistory } from "./storage.js";
+import { agentSchema, defaultAgents, agentProfile, agentLabel, binaries } from "./agents.js";
+import { loadBatch, loadBatchHistory, ensureRoot, acquireLock } from "./storage.js";
 import { textReport, csvReport, renderReport } from "./display.js";
 import { schedule } from "./schedule.js";
 import { redact } from "./credentials.js";
@@ -22,7 +22,7 @@ const program = new Command()
     fileURLToPath(new URL("../bench.json", import.meta.url)),
   )
   .option("--root <path>", "Private benchmark runtime/results root")
-  .option("--auth-file <path>", "Existing OpenCode OAuth file to share; never copied")
+  .option("--auth-file <path>", "Existing OpenCode 1 OAuth file to share; never copied")
   .showHelpAfterError();
 
 async function context(command: Command) {
@@ -40,7 +40,7 @@ const selectionSchema = z.object({
   techniques: z.string().default(techniqueSchema.options.join(",")),
   workloads: z.string().default("task,noop"),
   benchmark: z.literal("github").default("github"),
-  agents: z.string().default(agentSchema.options.join(",")),
+  agents: z.string().default(defaultAgents.join(",")),
   tui: z.boolean().default(true),
 });
 
@@ -71,8 +71,8 @@ function selectOptions(command: Command) {
     .option("--benchmark <name>", "Only github is implemented", "github")
     .option(
       "--agents <names>",
-      "Comma-separated claude,codex,opencode",
-      agentSchema.options.join(","),
+      "Comma-separated claude,codex,opencode,opencode2 (v2 is opt-in)",
+      defaultAgents.join(","),
     )
     .option(
       "--techniques <names>",
@@ -89,8 +89,8 @@ program
   .description("Check versions and existing subscription auth; no model calls")
   .option(
     "--agents <names>",
-    "Comma-separated claude,codex,opencode",
-    agentSchema.options.join(","),
+    "Comma-separated claude,codex,opencode,opencode2 (v2 is opt-in)",
+    defaultAgents.join(","),
   )
   .option(
     "--check-access",
@@ -115,6 +115,27 @@ program
         )
       ).join("\n"),
     );
+  });
+
+program
+  .command("auth-opencode2")
+  .description("Log in to ChatGPT in the private OpenCode 2 benchmark profile; no model calls")
+  .action(async (_options: unknown, command: Command) => {
+    const { config, paths } = await context(command);
+    const installed = await binaries(config, ["opencode2"]);
+    const binary = installed.executables.opencode2;
+    if (!binary) throw new Error("OpenCode 2 executable is unavailable.");
+    await ensureRoot(paths);
+    const release = await acquireLock(paths);
+    try {
+      const { setupOpencode2Auth } = await import("./opencode2.js");
+      await setupOpencode2Auth(paths, binary);
+      console.log(
+        "OpenCode 2 benchmark ChatGPT login is ready. Personal configuration and sessions were not imported.",
+      );
+    } finally {
+      await release();
+    }
   });
 
 selectOptions(
@@ -211,7 +232,7 @@ program
   .option("--credentials", "Delete only the registered benchmark GitHub Keychain item")
   .option(
     "--runtime",
-    "Delete private attempts, native logs, saved results, and auth links (not shared auth)",
+    "Delete attempts, results, and the private OpenCode 2 login/profile (not personal auth)",
   )
   .option("--apply", "Perform the listed deletions")
   .action(async (_options: unknown, command: Command) => {

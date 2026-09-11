@@ -88,6 +88,9 @@ export function combineBatches(batches: readonly Batch[], fallback: Batch): Batc
       } else if (agent === "codex") {
         config.codexVersion = batch.manifest.config.codexVersion;
         config.codexModel = batch.manifest.config.codexModel;
+      } else if (agent === "opencode2") {
+        config.opencode2Version = batch.manifest.config.opencode2Version;
+        config.model = batch.manifest.config.model;
       } else {
         config.opencodeVersion = batch.manifest.config.opencodeVersion;
         config.model = batch.manifest.config.model;
