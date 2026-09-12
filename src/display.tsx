@@ -536,7 +536,27 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     : [initialBatch, ...history.batches];
   const [viewBenchmark, setViewBenchmark] = useState<Benchmark>(initialBatch.manifest.benchmark);
   const available = allBatches.filter((batch) => batch.manifest.benchmark === viewBenchmark);
-  const [batchIDs, setBatchIDs] = useState(new Set([initialBatch.manifest.id]));
+  const [batchIDsByBenchmark, setBatchIDsByBenchmark] = useState<
+    Record<Benchmark, Set<string>>
+  >(() => ({
+    github: new Set(
+      initialBatch.manifest.benchmark === "github"
+        ? [initialBatch.manifest.id]
+        : allBatches
+            .filter((batch) => batch.manifest.benchmark === "github")
+            .slice(0, 1)
+            .map((batch) => batch.manifest.id),
+    ),
+    suite: new Set(
+      initialBatch.manifest.benchmark === "suite"
+        ? [initialBatch.manifest.id]
+        : allBatches
+            .filter((batch) => batch.manifest.benchmark === "suite")
+            .slice(0, 1)
+            .map((batch) => batch.manifest.id),
+    ),
+  }));
+  const batchIDs = batchIDsByBenchmark[viewBenchmark];
   const [batchCursor, setBatchCursor] = useState(
     Math.max(
       0,
@@ -772,7 +792,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
         setNotice(problem);
         return;
       }
-      setBatchIDs(next);
+      setBatchIDsByBenchmark((current) => ({ ...current, [viewBenchmark]: next }));
       setSelected(0);
       setAttempt(0);
       setScroll(0);
@@ -783,13 +803,9 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     if (!detail && ["1", "2", "3", "4"].includes(input)) {
       const nextBenchmark: Benchmark = Number(input) <= 2 ? "github" : "suite";
       const nextWorkload = Number(input) % 2 === 1 ? "task" : "noop";
-      const nextAvailable = allBatches.filter(
-        (batch) => batch.manifest.benchmark === nextBenchmark,
-      );
       setViewBenchmark(nextBenchmark);
       setWorkload(nextWorkload);
       setBatchCursor(0);
-      setBatchIDs(new Set(nextAvailable[0] ? [nextAvailable[0].manifest.id] : []));
       setSelected(0);
       setAttempt(0);
       setScroll(0);
