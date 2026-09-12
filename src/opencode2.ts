@@ -832,12 +832,6 @@ export default {
             part.data.tool = "bash";
             const state = object.safeParse(part.data.state);
             const input = state.success ? object.safeParse(state.data.input) : undefined;
-            if (
-              input?.success &&
-              (input.data.background === true ||
-                (input.data.workdir !== undefined && input.data.workdir !== cwd))
-            )
-              events.invalidRoute = true;
             const metadata = state.success ? object.safeParse(state.data.metadata) : undefined;
             const result = metadata?.success ? object.safeParse(metadata.data.metadata) : undefined;
             if (
@@ -850,6 +844,17 @@ export default {
             ) {
               state.data.status = "error";
               part.data.state = state.data;
+            }
+            if (input?.success) {
+              if (input.data.background === true) events.invalidRoute = true;
+              if (input.data.workdir !== undefined && input.data.workdir !== cwd) {
+                if (result?.success) events.invalidRoute = true;
+                else {
+                  const warning =
+                    "A shell call requested an unexpected work directory but did not start; corrected retries remain eligible.";
+                  if (!events.warnings.includes(warning)) events.warnings.push(warning);
+                }
+              }
             }
           }
           // Tool IDs are provider call IDs and can repeat across assistant messages.
