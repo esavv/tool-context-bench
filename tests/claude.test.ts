@@ -108,7 +108,7 @@ it("preserves subscription state without inherited API credentials and writes is
       "",
       "--strict-mcp-config",
       "--max-turns",
-      "8",
+      String(config.maxSteps),
       "mcp__github__*",
       "--print",
     ]),

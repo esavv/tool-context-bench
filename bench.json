@@ -13,7 +13,7 @@
   "variant": "medium",
   "repeats": 3,
   "timeoutSeconds": 180,
-  "maxSteps": 8,
+  "maxSteps": 16,
   "keychainService": "tool-context-bench.github",
   "suite": {
     "cliVersions": {

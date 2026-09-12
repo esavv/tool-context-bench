@@ -588,8 +588,8 @@ export async function prepareOpencode2(
   executor?: ExecutorConnection,
 ): Promise<PreparedAgent> {
   techniqueSchema.parse(trial.technique);
-  if (config.model !== "openai/gpt-5.6-terra" || config.maxSteps !== 8)
-    throw new Error("OpenCode 2 milestone 1 requires openai/gpt-5.6-terra and maxSteps=8.");
+  if (config.model !== "openai/gpt-5.6-terra" || config.maxSteps !== 16)
+    throw new Error("OpenCode 2 requires openai/gpt-5.6-terra and maxSteps=16.");
   const bash = trial.technique === "bash";
   if (
     !bash &&
@@ -817,7 +817,7 @@ export default {
         : trial.technique === "executor"
           ? "Executor MCP exposes executor_execute, executor_resume, and executor_skills; native execute is denied and Executor performs the required code execution."
           : "Direct shell or MCP definitions only; MCP codemode=false; execute denied before tool snapshot; no Code Mode catalog.",
-      "steps=8 (eighth logical step is text-only; retries can add requests); explicit title prevents title generation.",
+      `steps=${config.maxSteps} (final logical step is text-only; retries can add requests); explicit title prevents title generation.`,
       "No OS sandbox: shell permissions are not a filesystem security boundary.",
       "Native V2 assistant step projections supply usage and model identity, reconciled with session counters; unknown fields remain unknown.",
     ],

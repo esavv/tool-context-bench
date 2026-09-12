@@ -21,7 +21,7 @@ export const configSchema = z.strictObject({
   variant: z.enum(["low", "medium", "high"]).default("medium"),
   repeats: z.number().int().min(1).max(10).default(3),
   timeoutSeconds: z.number().int().min(10).max(600).default(180),
-  maxSteps: z.number().int().min(2).max(20).default(8),
+  maxSteps: z.number().int().min(2).max(20).default(16),
   keychainService: z.literal("tool-context-bench.github").default("tool-context-bench.github"),
   suite: z
     .strictObject({
