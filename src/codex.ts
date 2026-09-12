@@ -128,6 +128,7 @@ export async function prepareCodex(
           BENCH_STRIPE_TOKEN: credentials.stripe,
           ...(trial.technique === "bash"
             ? {
+                SUPABASE_HOME: join(cwd, ".supabase"),
                 SUPABASE_ACCESS_TOKEN: credentials.supabase,
                 CLOUDFLARE_API_TOKEN: credentials.cloudflare,
                 CLOUDFLARE_ACCOUNT_ID: config.suite?.cloudflare.accountId,

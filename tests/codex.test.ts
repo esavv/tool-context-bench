@@ -271,9 +271,14 @@ it("does not configure MCP servers for suite Bash", async () => {
   );
   preparedAgents.push(prepared);
   const toml = await readFile(prepared.configPath, "utf8");
+  const supabaseHome = prepared.env.SUPABASE_HOME;
+  if (!supabaseHome) throw new Error("Missing Supabase home");
   expect(toml).not.toContain("[mcp_servers.");
   expect(prepared.env.GH_TOKEN).toBe(credentials.github);
+  expect(supabaseHome).toBe(join(prepared.cwd, ".supabase"));
   expect(prepared.env.SUPABASE_ACCESS_TOKEN).toBe(credentials.supabase);
+  expect(toml).toContain('"SUPABASE_HOME"');
+  await expect(lstat(supabaseHome)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 it("normalizes shell events and reads only the SQLite-selected thread, deduplicating response usage", async () => {
