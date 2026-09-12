@@ -22,7 +22,7 @@ it("wraps the tuned upstream catalog as the minimal Executor surface", () => {
   expect(first.hash).toBe(second.hash);
   expect(first.server).toMatchObject({
     executorVersion,
-    downstreamTools: ["execute", "skills"],
+    downstreamTools: ["execute", "resume", "skills"],
     upstreamCatalogHash: upstream.hash,
   });
 });

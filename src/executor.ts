@@ -13,7 +13,7 @@ import { minimalEnvironment } from "./process.js";
 import { suiteServers, type SuiteCredentials } from "./suite.js";
 
 export const executorVersion = "1.6.8";
-export const executorToolNames = ["executor_execute", "executor_skills"];
+export const executorToolNames = ["executor_execute", "executor_resume", "executor_skills"];
 
 export interface ExecutorConnection {
   url: string;
@@ -24,7 +24,7 @@ export interface ExecutorConnection {
 export function executorCatalog(upstream: Catalog): Catalog {
   const evidence = {
     executorVersion,
-    downstreamTools: ["execute", "skills"],
+    downstreamTools: ["execute", "resume", "skills"],
     upstreamCatalogHash: upstream.hash,
     upstreamServer: upstream.server,
   };
@@ -50,7 +50,7 @@ const executorToolSchema = z.object({
   name: z.string(),
   description: z.string(),
   pluginId: z.string(),
-  requiresApproval: z.boolean().optional(),
+  requiresApproval: z.boolean().nullable().optional(),
 });
 
 async function availablePort(): Promise<number> {
@@ -213,29 +213,18 @@ export async function prepareExecutor(
     }
 
     const sourceTools = z.array(sourceToolSchema).parse(catalog.tools);
-    const imported = z.array(executorToolSchema).parse(await request(origin, token, "/tools"));
+    const allTools = z.array(executorToolSchema).parse(await request(origin, token, "/tools"));
     const sourceByName = new Map(sourceTools.map((tool) => [`${tool._server}:${tool.name}`, tool]));
+    const imported = allTools.filter((tool) =>
+      sourceByName.has(`${tool.integration}:${tool.name}`),
+    );
     if (
       imported.length !== sourceTools.length ||
-      imported.some((tool) => !sourceByName.has(`${tool.integration}:${tool.name}`))
+      new Set(imported.map((tool) => `${tool.integration}:${tool.name}`)).size !==
+        sourceTools.length
     )
       throw new Error("Executor imported tool catalog does not match the approved suite catalog.");
 
-    for (const tool of imported) {
-      const source = sourceByName.get(`${tool.integration}:${tool.name}`);
-      if (source?.annotations?.readOnlyHint !== true) continue;
-      await request(origin, token, "/policies", "POST", {
-        owner: "org",
-        pattern: policyAddress(tool.address),
-        action: "approve",
-      });
-    }
-    await request(origin, token, "/policies", "POST", {
-      owner: "org",
-      pattern: "*",
-      action: "block",
-    });
-    const policies = await request(origin, token, "/policies");
     const schemas = await Promise.all(
       imported.map(async (tool) => ({
         address: tool.address,
@@ -252,6 +241,21 @@ export async function prepareExecutor(
           .digest("hex"),
       })),
     );
+    for (const tool of imported) {
+      const source = sourceByName.get(`${tool.integration}:${tool.name}`);
+      if (source?.annotations?.readOnlyHint !== true) continue;
+      await request(origin, token, "/policies", "POST", {
+        owner: "org",
+        pattern: policyAddress(tool.address),
+        action: "approve",
+      });
+    }
+    await request(origin, token, "/policies", "POST", {
+      owner: "org",
+      pattern: "*",
+      action: "block",
+    });
+    const policies = await request(origin, token, "/policies");
 
     const mcpUrl = `${origin}/mcp?artifacts=false`;
     const client = new Client({ name: "tool-context-bench", version: "0.1.0" });
@@ -266,8 +270,10 @@ export async function prepareExecutor(
       await client.close().catch(() => undefined);
     }
     const downstreamNames = downstream.tools.map((tool) => tool.name).sort();
-    if (JSON.stringify(downstreamNames) !== JSON.stringify(["execute", "skills"]))
-      throw new Error("Executor downstream MCP catalog is not the expected minimal surface.");
+    if (JSON.stringify(downstreamNames) !== JSON.stringify(["execute", "resume", "skills"]))
+      throw new Error(
+        `Executor downstream MCP catalog is not the expected minimal surface: ${downstreamNames.join(", ")}.`,
+      );
 
     await writeFile(
       join(directory, "executor-evidence.json"),

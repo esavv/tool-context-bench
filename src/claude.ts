@@ -606,7 +606,7 @@ export async function prepareClaude(
             "mcp__stripe__*",
           ]
         : trial.technique === "executor"
-          ? ["mcp__executor__execute", "mcp__executor__skills"]
+          ? ["mcp__executor__execute", "mcp__executor__resume", "mcp__executor__skills"]
           : benchmark === "suite"
             ? ["mcp__github__*", "mcp__supabase__*", "mcp__cloudflare__*", "mcp__stripe__*"]
             : ["mcp__github__*"];
