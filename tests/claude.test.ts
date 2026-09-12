@@ -246,6 +246,35 @@ it("counts stream snapshots once, keeps completed usage, and joins tool results 
   expect(collector.collect()).toEqual(usage);
 });
 
+it("keeps reconciled request usage complete when Claude reaches its turn limit", () => {
+  const collector = new ClaudeCollector(trial, undefined, token, sessionID);
+  const send = (event: unknown) => collector.line(JSON.stringify(event));
+  const stream = (event: unknown) => send({ type: "stream_event", session_id: sessionID, event });
+  send({ type: "system", subtype: "init", session_id: sessionID, tools: ["Bash"] });
+  stream({
+    type: "message_start",
+    message: {
+      id: "msg_limited",
+      model: "claude-sonnet-5",
+      usage: { input_tokens: 10, cache_read_input_tokens: 20, output_tokens: 1 },
+    },
+  });
+  stream({ type: "message_delta", usage: { output_tokens: 7 } });
+  stream({ type: "message_stop" });
+  send({
+    type: "result",
+    subtype: "error_max_turns",
+    is_error: true,
+    usage: { input_tokens: 10, cache_read_input_tokens: 20, output_tokens: 7 },
+  });
+  const usage = collector.collect();
+  expect(usage.metrics).toMatchObject({ totalTokens: 37, steps: 1, complete: true });
+  expect(collector.events.error).toBe(true);
+  expect(usage.warnings).toContain(
+    "Claude did not report a successful final result; raw errors were not exported.",
+  );
+});
+
 it("accepts Claude tool search with the complete callable MCP inventory", () => {
   const collector = new ClaudeCollector(
     { ...trial, technique: "tool-search" },

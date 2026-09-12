@@ -3,11 +3,69 @@ import { join, basename } from "node:path";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import type { Paths } from "./config.js";
-import { manifestSchema, resultSchema, type Batch, type BatchHistory } from "./types.js";
+import {
+  manifestSchema,
+  resultSchema,
+  type Batch,
+  type BatchHistory,
+  type Result,
+} from "./types.js";
 import { sessionDetails } from "./session.js";
 
 const owner = "tool-context-bench/v1";
 const markerSchema = z.object({ owner: z.literal(owner) });
+const usageCount = z.number().int().nonnegative();
+const claudeRequestUsageSchema = z.object({
+  freshInput: usageCount,
+  cacheRead: usageCount,
+  cacheWrite: usageCount,
+  totalInput: usageCount,
+  totalOutput: usageCount,
+  totalTokens: usageCount,
+  complete: z.literal(true),
+});
+
+async function recoverClaudeUsage(directory: string, result: Result): Promise<void> {
+  if (result.trial.agent !== "claude" || result.metrics === null || result.metrics.complete) return;
+  try {
+    const raw: unknown = JSON.parse(
+      await readFile(join(directory, `${basename(result.trial.id)}.requests.json`), "utf8"),
+    );
+    const requests = z.array(claudeRequestUsageSchema).parse(raw);
+    if (requests.length === 0) return;
+    const sums = {
+      freshInput: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalInput: 0,
+      totalOutput: 0,
+      totalTokens: 0,
+    };
+    for (const request of requests) {
+      sums.freshInput += request.freshInput;
+      sums.cacheRead += request.cacheRead;
+      sums.cacheWrite += request.cacheWrite;
+      sums.totalInput += request.totalInput;
+      sums.totalOutput += request.totalOutput;
+      sums.totalTokens += request.totalTokens;
+    }
+    if (
+      result.metrics.steps === requests.length &&
+      result.metrics.initialInput === requests[0]?.totalInput &&
+      result.metrics.freshInput === sums.freshInput &&
+      result.metrics.cacheRead === sums.cacheRead &&
+      result.metrics.cacheWrite === sums.cacheWrite &&
+      result.metrics.totalInput === sums.totalInput &&
+      result.metrics.totalOutput === sums.totalOutput &&
+      result.metrics.totalTokens === sums.totalTokens
+    ) {
+      result.metrics.complete = true;
+      if (result.status === "usage-incomplete") result.status = "complete";
+    }
+  } catch {
+    // Older or partial sidecars keep their original incomplete classification.
+  }
+}
 
 export async function saveJson(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -152,6 +210,7 @@ export async function loadBatch(paths: Paths, id: string): Promise<Batch> {
       }
     }
     const result = resultSchema.parse(data);
+    await recoverClaudeUsage(directory, result);
     if (!result.session) {
       const attemptDirectory = join(paths.attempts, `${selected}_${basename(result.trial.id)}`);
       let configuration: unknown;

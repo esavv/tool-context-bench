@@ -341,6 +341,52 @@ describe("runtime locking", () => {
 });
 
 describe("view batch loading", () => {
+  it("recovers reconciled Claude request usage without rewriting saved results", async () => {
+    const batch = await writeBatch("claude-usage-batch");
+    const directory = join(paths.results, "claude-usage-batch");
+    const [base] = batch.results;
+    if (!base) throw new Error("Expected a saved test result.");
+    const result = {
+      ...base,
+      trial: { ...base.trial, id: "claude-limited", agent: "claude" },
+      status: "usage-incomplete",
+      metrics: {
+        initialInput: 30,
+        freshInput: 10,
+        cacheRead: 20,
+        cacheWrite: 0,
+        totalInput: 30,
+        totalOutput: 7,
+        totalTokens: 37,
+        reasoning: 0,
+        steps: 1,
+        complete: false,
+      },
+    };
+    await writeFile(join(directory, "0.result.json"), JSON.stringify(result));
+    await rm(join(directory, "1.result.json"));
+    await writeFile(
+      join(directory, "claude-limited.requests.json"),
+      JSON.stringify([
+        {
+          id: "msg_limited",
+          model: "claude-sonnet-5",
+          freshInput: 10,
+          cacheRead: 20,
+          cacheWrite: 0,
+          totalInput: 30,
+          totalOutput: 7,
+          totalTokens: 37,
+          complete: true,
+        },
+      ]),
+    );
+    const before = await readFile(join(directory, "0.result.json"), "utf8");
+    const loaded = await loadBatch(paths, "claude-usage-batch");
+    expect(loaded.results[0]).toMatchObject({ status: "complete", metrics: { complete: true } });
+    expect(await readFile(join(directory, "0.result.json"), "utf8")).toBe(before);
+  });
+
   it("loads version 3 results with unknown grading without rewriting them", async () => {
     const batch = await writeBatch("version-3-batch");
     const directory = join(paths.results, "version-3-batch");

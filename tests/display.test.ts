@@ -392,7 +392,7 @@ describe("summarize", () => {
     });
     expect(input).toEqual(before);
   });
-  it("counts successes independently and includes complete value failures in telemetry", () => {
+  it("counts successes independently and includes complete failed outcomes in telemetry", () => {
     const rows = summarize(
       batch([
         result("good"),
@@ -414,12 +414,12 @@ describe("summarize", () => {
     expect(rows[0]).toMatchObject({
       tried: 6,
       success: 3,
-      validSamples: 2,
+      validSamples: 3,
       statuses: { complete: 3, "usage-incomplete": 1, failed: 1, running: 1 },
       metrics: {
-        totalTokens: { n: 2, total: 1230 },
-        totalInput: { total: 600 },
-        cacheRead: { total: 400 },
+        totalTokens: { n: 3, total: 10230 },
+        totalInput: { total: 900 },
+        cacheRead: { total: 600 },
       },
     });
   });
@@ -557,7 +557,7 @@ describe("textReport", () => {
 });
 
 describe("csvReport", () => {
-  it("retains partial and failed observed usage without adding it to summary totals", () => {
+  it("excludes partial usage but includes complete failed usage in summary totals", () => {
     const records = parseCsv(
       csvReport(
         batch([
@@ -569,9 +569,9 @@ describe("csvReport", () => {
     expect(records[0]).toMatchObject({
       success: "1",
       tried: "2",
-      valid_samples: "0",
-      totalTokens_n: "0",
-      totalTokens_total: "",
+      valid_samples: "1",
+      totalTokens_n: "1",
+      totalTokens_total: "330",
     });
     expect(records[1]).toMatchObject({
       telemetry_complete: "false",
@@ -583,7 +583,7 @@ describe("csvReport", () => {
     expect(records[2]).toMatchObject({
       telemetry_complete: "true",
       totalTokens: "330",
-      valid_samples: "0",
+      valid_samples: "1",
     });
   });
 

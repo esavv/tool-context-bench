@@ -127,6 +127,10 @@ export class ClaudeCollector {
     this.warnings.add(message);
   }
 
+  private note(message: string): void {
+    this.warnings.add(message);
+  }
+
   private usage(value: unknown): Usage | undefined {
     const parsed = usageSchema.safeParse(value);
     if (!parsed.success || Object.keys(parsed.data).length === 0) {
@@ -207,7 +211,7 @@ export class ClaudeCollector {
       (Array.isArray(event.errors) && event.errors.length > 0)
     ) {
       this.events.error = true;
-      this.warn("Claude reported an error; raw error content was not exported.");
+      this.note("Claude reported an error; raw error content was not exported.");
     }
     if (event.type === "system" && event.subtype === "init") {
       this.initialized = true;
@@ -399,13 +403,13 @@ export class ClaudeCollector {
       this.finalUsage = this.usage(event.usage);
       if (event.subtype !== "success" || event.is_error === true) {
         this.events.error = true;
-        this.warn("Claude did not report a successful final result; raw errors were not exported.");
+        this.note("Claude did not report a successful final result; raw errors were not exported.");
       }
       this.events.answer =
         event.subtype === "success" && !this.events.error && typeof event.result === "string"
           ? redact(event.result, [this.token, ...this.extraSecrets])
           : this.fallbackAnswer;
-      if (typeof event.result !== "string") this.warn("Claude final answer was missing.");
+      if (typeof event.result !== "string") this.note("Claude final answer was missing.");
       if (Array.isArray(event.permission_denials) && event.permission_denials.length > 0) {
         this.warnings.add("Claude reported denied tool permissions.");
       }
@@ -473,7 +477,7 @@ export class ClaudeCollector {
             : totals(requests[0].usage).totalInput,
         reasoning: 0,
         steps: requests.length,
-        complete: !this.incomplete && !this.events.malformed && !this.events.error,
+        complete: !this.incomplete && !this.events.malformed,
       },
       requests: requests.map((request) => ({
         id: redact(request.id, [this.token, ...this.extraSecrets]),
