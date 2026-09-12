@@ -658,6 +658,10 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     }
     return lines;
   };
+  const groups = techniques
+    .map((technique) => rows.filter((item) => item.technique === technique))
+    .filter((group) => group.length);
+  const desiredChartHeight = groups.reduce((height, group) => height + group.length + 2, 0);
   const chartLegend = keyRows(
     detail
       ? [
@@ -684,7 +688,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
           batchRowLines -
           chartLegend.length -
           (width < 60 ? 2 : 1) -
-          6 -
+          desiredChartHeight -
           (notice ? 1 : 0)) /
           batchRowLines,
       ),
@@ -714,9 +718,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       (detail ? 0 : 1) -
       (!detail && notice ? 1 : 0),
   );
-  const groups = techniques
-    .map((technique) => rows.filter((item) => item.technique === technique))
-    .filter((group) => group.length);
   const selectedGroup = Math.max(
     0,
     groups.findIndex((group) => row !== undefined && group.includes(row)),
@@ -726,22 +727,22 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     groupTop < selectedGroup &&
     groups
       .slice(groupTop, selectedGroup + 1)
-      .reduce((height, group) => height + group.length + 3, 0) > pageSize
+      .reduce((height, group) => height + group.length + 2, 0) > pageSize
   )
     groupTop++;
   const visibleGroups: SummaryRow[][] = [];
   let chartHeight = 0;
   for (const group of groups.slice(groupTop)) {
-    if (chartHeight + group.length + 3 > pageSize) {
+    if (chartHeight + group.length + 2 > pageSize) {
       if (visibleGroups.length === 0) {
-        const capacity = Math.max(1, pageSize - 3);
+        const capacity = Math.max(1, pageSize - 2);
         const start = Math.max(0, (row ? group.indexOf(row) : 0) - capacity + 1);
         visibleGroups.push(group.slice(start, start + capacity));
       }
       break;
     }
     visibleGroups.push(group);
-    chartHeight += group.length + 3;
+    chartHeight += group.length + 2;
   }
   const initialMax = Math.max(0, ...rows.map((item) => item.metrics.initialInput.median ?? 0));
   const totalMax = Math.max(0, ...rows.map((item) => item.metrics.totalTokens.median ?? 0));
@@ -916,7 +917,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
               <Text bold {...inkColor(palette.white)}>
                 {group[0] ? techniqueLabel(group[0].technique) : ""}
               </Text>
-              <Text> </Text>
               {group.map((item) => {
                 const initial = item.metrics.initialInput;
                 const total = item.metrics.totalTokens;
