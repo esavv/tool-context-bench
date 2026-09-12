@@ -536,26 +536,26 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     : [initialBatch, ...history.batches];
   const [viewBenchmark, setViewBenchmark] = useState<Benchmark>(initialBatch.manifest.benchmark);
   const available = allBatches.filter((batch) => batch.manifest.benchmark === viewBenchmark);
-  const [batchIDsByBenchmark, setBatchIDsByBenchmark] = useState<
-    Record<Benchmark, Set<string>>
-  >(() => ({
-    github: new Set(
-      initialBatch.manifest.benchmark === "github"
-        ? [initialBatch.manifest.id]
-        : allBatches
-            .filter((batch) => batch.manifest.benchmark === "github")
-            .slice(0, 1)
-            .map((batch) => batch.manifest.id),
-    ),
-    suite: new Set(
-      initialBatch.manifest.benchmark === "suite"
-        ? [initialBatch.manifest.id]
-        : allBatches
-            .filter((batch) => batch.manifest.benchmark === "suite")
-            .slice(0, 1)
-            .map((batch) => batch.manifest.id),
-    ),
-  }));
+  const [batchIDsByBenchmark, setBatchIDsByBenchmark] = useState<Record<Benchmark, Set<string>>>(
+    () => ({
+      github: new Set(
+        initialBatch.manifest.benchmark === "github"
+          ? [initialBatch.manifest.id]
+          : allBatches
+              .filter((batch) => batch.manifest.benchmark === "github")
+              .slice(0, 1)
+              .map((batch) => batch.manifest.id),
+      ),
+      suite: new Set(
+        initialBatch.manifest.benchmark === "suite"
+          ? [initialBatch.manifest.id]
+          : allBatches
+              .filter((batch) => batch.manifest.benchmark === "suite")
+              .slice(0, 1)
+              .map((batch) => batch.manifest.id),
+      ),
+    }),
+  );
   const batchIDs = batchIDsByBenchmark[viewBenchmark];
   const [batchCursor, setBatchCursor] = useState(
     Math.max(
@@ -666,8 +666,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       : [
           ["i", "Initial input + cache"],
           ["t", "Total session tokens"],
-          ["1/2", "github task/no-op"],
-          ["3/4", "multi-tool task/no-op"],
           ["↑↓", "select"],
           ["enter", "detail"],
           ["q", "quit"],
@@ -746,17 +744,14 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
   const label = metrics.find((item) => item.key === metric)?.label ?? metric;
   const max = Math.max(0, ...rows.map((item) => item.metrics[metric].median ?? 0));
   const barCounts = (item: SummaryRow) =>
-    `${item.success}/${item.tried} success · ${item.validSamples} valid · ${item.pending} pending`;
+    `${item.success}/${item.tried} success${item.pending > 0 ? ` · ${item.pending} pending` : ""}`;
   const chartValue = (item: SummaryRow) => {
     const stat = item.metrics[metric];
     return stat.n === 0 && item.tried === 0 && item.pending > 0
       ? "pending"
       : formatted(stat.median);
   };
-  const valueWidth = Math.max(
-    7,
-    ...rows.map((item) => `${chartValue(item)} n=${item.metrics[metric].n}`.length),
-  );
+  const valueWidth = Math.max(7, ...rows.map((item) => chartValue(item).length));
   const countWidth = Math.max(0, ...rows.map((item) => barCounts(item).length));
   const agentWidth = Math.max(...agentSchema.options.map((agent) => agentLabel(agent).length));
   const barWidth = Math.max(1, width - 4 - (agentWidth + 2) - valueWidth - countWidth - 3);
@@ -863,7 +858,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
             >
               {benchmark === viewBenchmark && item === workload ? "▸" : " "}
               <Text {...inkColor(palette.key)}>{benchmarkIndex * 2 + workloadIndex + 1}</Text>{" "}
-              {benchmark === "suite" ? "multi-tool " : ""}
+              {benchmark === "suite" ? "multi-tool " : "github "}
               {item === "noop" ? "no-op" : item}
             </Text>
           )),
@@ -883,7 +878,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
         </Panel>
       ) : (
         <Panel
-          title={`${viewBenchmark === "suite" ? "multi-tool" : "github"} / ${workload} · ${label}`}
+          title={`${viewBenchmark === "suite" ? "multi-tool" : "github"} ${workload} · ${label}`}
           width={width}
         >
           <Text {...inkColor(palette.muted)} wrap="truncate-end">
@@ -908,8 +903,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                     </Text>{" "}
                     <Meter agent={item.agent} value={stat.median} max={max} width={barWidth} />{" "}
                     <Text {...inkColor(stat.n ? palette.white : palette.amber)}>
-                      {chartValue(item).padStart(valueWidth - ` n=${stat.n}`.length)}
-                      <Text {...inkColor(palette.muted)}> n={stat.n}</Text>
+                      {chartValue(item).padStart(valueWidth)}
                     </Text>{" "}
                     <Text
                       {...inkColor(item.validSamples < item.tried ? palette.amber : palette.muted)}
