@@ -39,7 +39,9 @@ it("states the exact suite answer field names", () => {
     workload: "task",
     repetition: 1,
   });
-  expect(text).toContain("sha (full tip SHA), subject, committed_at, and source_url");
+  expect(text).toContain(
+    "sha (exact 40-character lowercase hexadecimal tip SHA), subject, committed_at, and source_url",
+  );
   expect(text).toContain("Use exactly the field names listed above.");
 });
 
