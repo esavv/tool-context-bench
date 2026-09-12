@@ -87,7 +87,14 @@ it("preserves subscription state without inherited API credentials and writes is
     catalog,
     token,
   );
-  const bash = await prepareClaude(join(directory, "bash"), config, trial, undefined, token);
+  const bash = await prepareClaude(
+    join(directory, "bash"),
+    config,
+    trial,
+    undefined,
+    token,
+    "suite",
+  );
   expect(prepared.env.HOME).toBe("/synthetic/original-home");
   expect(prepared.env.CLAUDE_CONFIG_DIR).toBe("/synthetic/original-claude");
   expect(prepared.env.ANTHROPIC_API_KEY).toBeUndefined();
@@ -109,6 +116,7 @@ it("preserves subscription state without inherited API credentials and writes is
   expect(prepared.args).not.toContain("--no-session-persistence");
   expect(bash.args).toContain("Bash(gh api *)");
   expect(bash.args).toContain("Bash(jq *)");
+  expect(bash.args).toContain("Bash(wrangler d1 info *)");
   expect(prepared.events.sessionID).toMatch(/^[0-9a-f-]{36}$/);
   expect(prepared.events.sessionID).not.toBe(bash.events.sessionID);
   expect(prepared.args).toContain(prepared.events.sessionID);

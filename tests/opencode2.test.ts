@@ -281,6 +281,7 @@ it.each<Technique>(["bash", "mcp-raw", "mcp-filter", "mcp-filter-readonly"])(
       "synthetic-github-token",
       database,
       "/fixture/bin/opencode2",
+      technique === "bash" ? "suite" : "github",
     );
     const text = await readFile(prepared.configPath, "utf8");
     expect(text).not.toContain("synthetic-github-token");
@@ -300,7 +301,7 @@ it.each<Technique>(["bash", "mcp-raw", "mcp-filter", "mcp-filter-readonly"])(
       expect(text).toContain('"codemode": false');
       expect(text.includes("X-MCP-Readonly")).toBe(technique === "mcp-filter-readonly");
       expect(text.includes("X-MCP-Toolsets")).toBe(technique !== "mcp-raw");
-    }
+    } else expect(text).toContain("wrangler d1 info *");
     prepared.onLine(
       JSON.stringify({
         type: "tool_use",

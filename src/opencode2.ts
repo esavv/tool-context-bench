@@ -641,6 +641,7 @@ export async function prepareOpencode2(
             ? [
                 "supabase functions list *",
                 "wrangler d1 list *",
+                "wrangler d1 info *",
                 "stripe webhook_endpoints list *",
                 "stripe webhook_endpoints retrieve *",
               ]
