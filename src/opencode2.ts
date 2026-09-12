@@ -638,7 +638,12 @@ export async function prepareOpencode2(
           "wc *",
           "echo *",
           ...(benchmark === "suite"
-            ? ["supabase functions list *", "wrangler d1 list *", "stripe webhook_endpoints list *"]
+            ? [
+                "supabase functions list *",
+                "wrangler d1 list *",
+                "stripe webhook_endpoints list *",
+                "stripe webhook_endpoints retrieve *",
+              ]
             : []),
         ].map((resource) => ({ action: "shell", resource, effect: "allow" }))
       : (catalog?.names ?? []).map((action) => ({ action, resource: "*", effect: "allow" }))),

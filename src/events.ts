@@ -134,7 +134,14 @@ export function approvedSuiteCommand(command: string, repository: string): boole
           args.slice(3).every((arg) => ["--json"].includes(arg))
         );
       if (executable === "stripe")
-        return args[1] === "webhook_endpoints" && args[2] === "list" && !args.includes("--live");
+        return (
+          args[1] === "webhook_endpoints" &&
+          !args.includes("--live") &&
+          (args[2] === "list" ||
+            (args[2] === "retrieve" &&
+              args.length === 4 &&
+              /^we_[A-Za-z0-9]+$/.test(args[3] ?? "")))
+        );
       return false;
     });
   } catch {

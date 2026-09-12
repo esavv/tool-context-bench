@@ -581,6 +581,7 @@ export async function prepareClaude(
                 "Bash(supabase functions list *)",
                 "Bash(wrangler d1 list *)",
                 "Bash(stripe webhook_endpoints list *)",
+                "Bash(stripe webhook_endpoints retrieve *)",
               ]
             : []),
         ]

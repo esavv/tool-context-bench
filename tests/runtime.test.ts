@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configSchema } from "../src/config.js";
 import { inspectSubscription, redact } from "../src/credentials.js";
-import { approvedCommand, EventCollector } from "../src/events.js";
+import { approvedCommand, approvedSuiteCommand, EventCollector } from "../src/events.js";
 import { answerMatches, githubHeaders, MCP_URL } from "../src/github.js";
 import { agentConfig, attemptEnvironment, prepareAttempt } from "../src/opencode.js";
 import { execute } from "../src/process.js";
@@ -436,6 +436,26 @@ describe("approvedCommand", () => {
     expect(
       approvedCommand(`gh api ${endpoint} --jq '${"x".repeat(16_000)}'`, config.repository),
     ).toBe(false);
+  });
+});
+
+describe("approvedSuiteCommand", () => {
+  it("accepts read-only Stripe webhook endpoint retrieval", () => {
+    expect(
+      approvedSuiteCommand(
+        "stripe webhook_endpoints retrieve we_1UEc3DJkEalzb2HflcWKjFS3",
+        config.repository,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    "stripe webhook_endpoints retrieve",
+    "stripe webhook_endpoints retrieve not-an-endpoint",
+    "stripe webhook_endpoints retrieve we_fixture --live",
+    "stripe webhook_endpoints delete we_fixture",
+  ])("rejects unsafe or malformed Stripe retrieval: %s", (command) => {
+    expect(approvedSuiteCommand(command, config.repository)).toBe(false);
   });
 });
 
