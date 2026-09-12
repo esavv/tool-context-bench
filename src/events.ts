@@ -99,15 +99,47 @@ export function approvedCommand(command: string, repository: string): boolean {
   }
 }
 
-export function approvedSuiteCommand(command: string, repository: string): boolean {
-  if (approvedCommand(command, repository)) return true;
-  if (
-    command.length > 16_000 ||
-    command.includes("\n") ||
-    command.includes("`") ||
-    /[;&<>]/.test(command)
-  )
-    return false;
+function splitShellCommands(command: string): string[] | null {
+  if (command.length > 16_000 || command.includes("`") || command.includes("$(")) return null;
+  const commands: string[] = [];
+  let start = 0;
+  let quote = "";
+  for (let index = 0; index < command.length; index++) {
+    const character = command[index] ?? "";
+    if (character === "\\" && quote !== "'") {
+      if (++index === command.length) return null;
+      continue;
+    }
+    if (character === quote) quote = "";
+    else if (!quote && (character === "'" || character === '"')) quote = character;
+    else if (!quote && (character === "\n" || character === ";")) {
+      commands.push(command.slice(start, index));
+      start = index + 1;
+    } else if (
+      !quote &&
+      (command.slice(index, index + 2) === "&&" || command.slice(index, index + 2) === "||")
+    ) {
+      commands.push(command.slice(start, index));
+      start = index + 2;
+      index++;
+    } else if (!quote && character === "&") return null;
+  }
+  if (quote) return null;
+  commands.push(command.slice(start));
+  const normalized = commands.map((part) => part.trim()).filter(Boolean);
+  return normalized.length ? normalized : null;
+}
+
+function stripEnvironment(command: string): string {
+  return command.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s+)+/, "");
+}
+
+function suiteServiceCommand(command: string, repository: string): string | null {
+  if (approvedCommand(command, repository)) {
+    const words = parse(command);
+    return words[1] === "--help" || words[1] === "help" || words[2] === "--help" ? null : "gh";
+  }
+  if (command.includes("\n") || command.includes("`") || /[;&<>]/.test(command)) return null;
   try {
     const words = parse(command, () => {
       throw new Error("Expansion is not permitted.");
@@ -116,9 +148,9 @@ export function approvedSuiteCommand(command: string, repository: string): boole
     for (const word of words) {
       if (typeof word === "string") segments.at(-1)?.push(word);
       else if ("op" in word && word.op === "|") segments.push([]);
-      else return false;
+      else return null;
     }
-    return segments.every((args, index) => {
+    const approved = segments.every((args, index) => {
       const executable = args[0]?.split("/").at(-1);
       if (index > 0) return executable === "jq" || executable === "wc";
       if (executable === "supabase")
@@ -144,9 +176,85 @@ export function approvedSuiteCommand(command: string, repository: string): boole
         );
       return false;
     });
+    return approved ? (segments[0]?.[0]?.split("/").at(-1) ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalDiagnostic(command: string): boolean {
+  try {
+    const words = parse(command, () => {
+      throw new Error("Expansion is not permitted.");
+    });
+    const segments: string[][] = [[]];
+    for (let index = 0; index < words.length; index++) {
+      const word = words[index];
+      if (typeof word === "string") segments.at(-1)?.push(word);
+      else if (word && "op" in word && word.op === "|") segments.push([]);
+      else if (
+        word &&
+        "op" in word &&
+        (word.op === ">" || word.op === ">>") &&
+        words[index + 1] === "/dev/null"
+      )
+        index++;
+      else return false;
+    }
+    const safe = new Set([
+      "pwd",
+      "printenv",
+      "rg",
+      "grep",
+      "sed",
+      "head",
+      "tail",
+      "ls",
+      "stat",
+      "test",
+      "wc",
+      "jq",
+    ]);
+    return segments.every((args, index) => {
+      const executable = args[0]?.split("/").at(-1);
+      if (executable === "command")
+        return (
+          args[1] === "-v" &&
+          args.slice(2).every((name) => ["gh", "supabase", "wrangler", "stripe"].includes(name))
+        );
+      if (executable === "type" || executable === "which")
+        return args
+          .slice(1)
+          .every((name) => ["gh", "supabase", "wrangler", "stripe"].includes(name));
+      if (executable === "rg" && args.some((arg) => arg === "--pre" || arg.startsWith("--pre=")))
+        return false;
+      if (executable && safe.has(executable)) return true;
+      return (
+        index === 0 &&
+        ["gh", "supabase", "wrangler", "stripe"].includes(executable ?? "") &&
+        (args[1] === "--help" || args[1] === "help")
+      );
+    });
   } catch {
     return false;
   }
+}
+
+function suiteCommandServices(command: string, repository: string): string[] | null {
+  const commands = splitShellCommands(command);
+  if (!commands) return null;
+  const services = new Set<string>();
+  for (const part of commands) {
+    const normalized = stripEnvironment(part);
+    const service = suiteServiceCommand(normalized, repository);
+    if (service) services.add(service);
+    else if (!safeLocalDiagnostic(normalized)) return null;
+  }
+  return [...services];
+}
+
+export function approvedSuiteCommand(command: string, repository: string): boolean {
+  return suiteCommandServices(command, repository) !== null;
 }
 
 export class EventCollector {
@@ -160,6 +268,7 @@ export class EventCollector {
   codeMode = false;
   readonly safeEvents: unknown[] = [];
   private readonly seen = new Set<string>();
+  private readonly suiteServices = new Set<string>();
 
   constructor(
     private readonly config: Config,
@@ -222,14 +331,17 @@ export class EventCollector {
     });
     if (/code.?mode|execute.?code|executor/.test(name)) this.codeMode = true;
     if (this.trial.workload !== "task") this.invalidRoute = true;
-    else if (this.trial.technique === "bash")
-      this.invalidRoute ||=
-        name !== "bash" ||
-        command === undefined ||
-        !(this.benchmark === "suite"
-          ? approvedSuiteCommand(command, this.config.repository)
-          : approvedCommand(command, this.config.repository));
-    else if (this.trial.technique === "tool-search" && /^(?:ToolSearch|tool_search)$/.test(name)) {
+    else if (this.trial.technique === "bash") {
+      if (name !== "bash" || command === undefined) this.invalidRoute = true;
+      else if (this.benchmark === "suite") {
+        const services = suiteCommandServices(command, this.config.repository);
+        if (services === null) this.invalidRoute = true;
+        else for (const service of services) this.suiteServices.add(service);
+      } else this.invalidRoute ||= !approvedCommand(command, this.config.repository);
+    } else if (
+      this.trial.technique === "tool-search" &&
+      /^(?:ToolSearch|tool_search)$/.test(name)
+    ) {
       // Discovery is expected in this condition; service calls are checked below.
     } else if (this.trial.technique === "tool-search" && name === "execute") {
       this.codeMode = true;
@@ -246,13 +358,10 @@ export class EventCollector {
     if (this.benchmark === "suite" && this.trial.workload === "task") {
       const completed = this.tools.filter((tool) => tool.status === "completed");
       if (this.trial.technique === "bash") {
-        const commands = completed.flatMap((tool) => (tool.command ? [tool.command] : []));
         return (
           !this.invalidRoute &&
           !this.malformed &&
-          ["gh", "supabase", "wrangler", "stripe"].every((name) =>
-            commands.some((command) => command.split(/\s+/)[0]?.split("/").at(-1) === name),
-          )
+          ["gh", "supabase", "wrangler", "stripe"].every((name) => this.suiteServices.has(name))
         );
       }
       if (

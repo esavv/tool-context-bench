@@ -458,9 +458,88 @@ describe("approvedSuiteCommand", () => {
   ])("rejects unsafe or malformed Stripe retrieval: %s", (command) => {
     expect(approvedSuiteCommand(command, config.repository)).toBe(false);
   });
+
+  it("accepts compound approved reads and local CLI diagnostics", () => {
+    expect(
+      approvedSuiteCommand(
+        "command -v gh && command -v supabase && command -v wrangler && command -v stripe",
+        config.repository,
+      ),
+    ).toBe(true);
+    expect(
+      approvedSuiteCommand(
+        "supabase --help | sed -n '1,160p'\nwrangler d1 list --json\nstripe webhook_endpoints retrieve we_fixture",
+        config.repository,
+      ),
+    ).toBe(true);
+    expect(
+      approvedSuiteCommand(
+        'SUPABASE_CONFIG_DIR="$PWD/.supabase-cli-config" supabase functions list --project-ref fixture --output json',
+        config.repository,
+      ),
+    ).toBe(true);
+    expect(
+      approvedSuiteCommand(
+        'rg -uuu -i "SUPABASE.*(CONFIG|DIR)" /installed/supabase 2>/dev/null | head -80',
+        config.repository,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    "curl https://api.github.com/repos/fixture-owner/fixture-repo",
+    "command curl https://api.github.com/repos/fixture-owner/fixture-repo",
+    "env curl https://api.github.com/repos/fixture-owner/fixture-repo",
+    "SOURCE=$(curl https://api.github.com) gh api repos/fixture-owner/fixture-repo/commits/main",
+    "rg --pre='curl https://api.github.com' fixture .",
+    "node -e 'fetch(\"https://api.github.com\")'",
+    "wrangler d1 delete fixture",
+    "gh api repos/fixture-owner/fixture-repo/commits/main; stripe webhook_endpoints delete we_fixture",
+  ])("rejects prohibited suite shell routes: %s", (command) => {
+    expect(approvedSuiteCommand(command, config.repository)).toBe(false);
+  });
 });
 
 describe("EventCollector", () => {
+  it("accepts failed approved reads and harmless diagnostics when suite route coverage is complete", () => {
+    const collector = new EventCollector(config, trial(), names, token, names, "suite");
+    collector.line(
+      toolEvent(
+        "bash",
+        "completed",
+        "command -v gh && command -v supabase && command -v wrangler && command -v stripe",
+        "diagnostic",
+      ),
+    );
+    collector.line(toolEvent("bash", "completed", `gh api ${endpoint}`, "github"));
+    collector.line(
+      toolEvent(
+        "bash",
+        "error",
+        "SUPABASE_TELEMETRY_DISABLED=1 supabase functions list --project-ref fixture --output json",
+        "supabase",
+      ),
+    );
+    collector.line(
+      toolEvent(
+        "bash",
+        "completed",
+        "wrangler d1 list --json\nstripe webhook_endpoints retrieve we_fixture",
+        "cloudflare-stripe",
+      ),
+    );
+    collector.line(
+      toolEvent(
+        "bash",
+        "completed",
+        'rg -i "SUPABASE.*CONFIG" /installed/supabase 2>/dev/null | head -80',
+        "source-diagnostic",
+      ),
+    );
+    expect(collector.invalidRoute).toBe(false);
+    expect(collector.routeValid).toBe(true);
+  });
+
   it.each(schedule(1, techniques, 0).filter((item) => item.workload !== "task"))(
     "accepts no tools and rejects a tool for $id",
     (item) => {
