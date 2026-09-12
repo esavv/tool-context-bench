@@ -57,6 +57,18 @@ it("identifies Executor as the only service route for its technique", () => {
   expect(text).toContain("TypeScript execution mechanism");
 });
 
+it("keeps the shared tool-search prompt agent-neutral", () => {
+  const text = suitePrompt(config, {
+    id: "codex-tool-search-task-1",
+    agent: "codex",
+    technique: "tool-search",
+    workload: "task",
+    repetition: 1,
+  });
+  expect(text).toContain("Use only native tool discovery and the configured MCP services.");
+  expect(text).not.toContain("OpenCode");
+});
+
 it("parses the Supabase functions response envelope", () => {
   const github = {
     sha: "a".repeat(40),

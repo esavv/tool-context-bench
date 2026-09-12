@@ -368,7 +368,7 @@ export function suitePrompt(config: Config, trial: Trial): string {
       : trial.technique === "executor"
         ? "Use only the configured Executor MCP tools. Use Executor's TypeScript execution mechanism to discover and call the approved upstream MCP tools. Relevant read tools are github list_commits/get_commit, supabase list_edge_functions, cloudflare d1_database_get/d1_databases_list, and Stripe stripe_api_search/stripe_api_details/stripe_api_read. Executor paths use <service>.org.benchmark.<tool>; call known paths directly and combine discovery or reads in one execution when practical."
         : trial.technique === "tool-search"
-          ? "Use only native tool discovery and the configured MCP services. OpenCode 2 uses its integrated search and code-mode execute mechanism."
+          ? "Use only native tool discovery and the configured MCP services."
           : "Use only the configured GitHub, Supabase, Cloudflare, and Stripe MCP tools.";
   return `Read these four remote fixtures without changing data:
 - GitHub branch ${config.branch} in ${config.repository}: sha (exact 40-character lowercase hexadecimal tip SHA), subject, committed_at, and source_url.
