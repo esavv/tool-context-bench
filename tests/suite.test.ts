@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { configSchema } from "../src/config.js";
-import { parseSuiteExpected } from "../src/suite.js";
+import { parseSuiteExpected, suitePrompt } from "../src/suite.js";
 
 const functionID = "11111111-1111-4111-8111-111111111111";
 const databaseID = "22222222-2222-4222-8222-222222222222";
@@ -29,6 +29,18 @@ const config = configSchema.parse({
       keychainService: "tool-context-bench.stripe",
     },
   },
+});
+
+it("states the exact suite answer field names", () => {
+  const text = suitePrompt(config, {
+    id: "opencode2-mcp-raw-task-1",
+    agent: "opencode2",
+    technique: "mcp-raw",
+    workload: "task",
+    repetition: 1,
+  });
+  expect(text).toContain("sha (full tip SHA), subject, committed_at, and source_url");
+  expect(text).toContain("Use exactly the field names listed above.");
 });
 
 it("parses the Supabase functions response envelope", () => {

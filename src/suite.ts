@@ -341,9 +341,9 @@ export function suitePrompt(config: Config, trial: Trial): string {
         ? "Use only native tool discovery and the configured MCP services. OpenCode 2 uses its integrated search and code-mode execute mechanism."
         : "Use only the configured GitHub, Supabase, Cloudflare, and Stripe MCP tools.";
   return `Read these four remote fixtures without changing data:
-- GitHub branch ${config.branch} in ${config.repository}: tip sha, subject, committed_at, and source_url.
+- GitHub branch ${config.branch} in ${config.repository}: sha (full tip SHA), subject, committed_at, and source_url.
 - Supabase Edge Function ${config.suite.supabase.edgeFunctionSlug} in project ${config.suite.supabase.projectRef}: id, slug, and status.
 - Cloudflare D1 database ${config.suite.cloudflare.d1DatabaseName}: uuid, name, created_at, and version.
 - Stripe sandbox webhook endpoint ${config.suite.stripe.webhookEndpointId}: webhook_endpoint_id and description.
-Return exactly one JSON object with github, supabase, cloudflare, and stripe objects. Use remote data and no local fixture checkout. ${route} Do not use SDKs, curl, or another route.`;
+Return exactly one JSON object with github, supabase, cloudflare, and stripe objects. Use exactly the field names listed above. Use remote data and no local fixture checkout. ${route} Do not use SDKs, curl, or another route.`;
 }
