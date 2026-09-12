@@ -310,15 +310,7 @@ export async function prepareCodex(
   );
   const authLink = join(codexHome, "auth.json");
   await symlink(sourceAuth, authLink);
-  const events = new EventCollector(
-    config,
-    trial,
-    catalog?.names ?? [],
-    token,
-    catalog?.readOnlyNames ?? [],
-    benchmark,
-    credentials ? Object.values(credentials) : [],
-  );
+  const events = new EventCollector(trial, token, credentials ? Object.values(credentials) : []);
   const stdoutUsage: unknown[] = [];
   const seenItems = new Set<string>();
   const dataPath = join(codexHome, "state_5.sqlite");
@@ -327,7 +319,7 @@ export async function prepareCodex(
     const code = /code.?mode|execute.?code|executor|node_repl|cua_repl/.test(name);
     if (!code && !/^(?:tool_search|web_search)(?:_call)?$/.test(name)) return false;
     events.codeMode ||= code;
-    if (trial.technique !== "tool-search") events.invalidRoute = true;
+    if (trial.technique !== "tool-search") events.error = true;
     const warning = "Codex search or Code Mode use was observed despite direct-tool settings.";
     if (!events.warnings.includes(warning)) events.warnings.push(warning);
     return true;
@@ -421,7 +413,7 @@ export async function prepareCodex(
               )
                 command = words[2];
             } catch {
-              // Keep unrecognized shell syntax for the canonical route validator to reject.
+              // Keep unrecognized shell syntax in the recorded command.
             }
           }
         } else if (

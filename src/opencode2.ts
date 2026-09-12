@@ -776,15 +776,7 @@ export default {
         cwd,
         benchmark === "suite" ? ["github", "supabase", "cloudflare", "stripe"] : ["github"],
       );
-  const events = new EventCollector(
-    config,
-    trial,
-    catalog?.names ?? [],
-    token,
-    catalog?.readOnlyNames ?? [],
-    benchmark,
-    credentials ? Object.values(credentials) : [],
-  );
+  const events = new EventCollector(trial, token, credentials ? Object.values(credentials) : []);
   return {
     directory,
     cwd,
@@ -802,7 +794,7 @@ export default {
         ? "Integrated MCP search plus Code Mode: MCP codemode=true and execute is the only exposed service mechanism."
         : "Direct shell or MCP definitions only; MCP codemode=false; execute denied before tool snapshot; no Code Mode catalog.",
       "steps=8 (eighth logical step is text-only; retries can add requests); explicit title prevents title generation.",
-      "No OS sandbox: shell permissions plus post-run route validation are not a filesystem security boundary.",
+      "No OS sandbox: shell permissions are not a filesystem security boundary.",
       "Native V2 assistant step projections supply usage and model identity, reconciled with session counters; unknown fields remain unknown.",
     ],
     args: [
@@ -826,12 +818,11 @@ export default {
           const native = part.data.tool;
           if (native === "execute") {
             events.codeMode = true;
-            if (trial.technique !== "tool-search") events.invalidRoute = true;
+            if (trial.technique !== "tool-search") events.error = true;
           }
           if (native === "shell") {
             part.data.tool = "bash";
             const state = object.safeParse(part.data.state);
-            const input = state.success ? object.safeParse(state.data.input) : undefined;
             const metadata = state.success ? object.safeParse(state.data.metadata) : undefined;
             const result = metadata?.success ? object.safeParse(metadata.data.metadata) : undefined;
             if (
@@ -844,17 +835,6 @@ export default {
             ) {
               state.data.status = "error";
               part.data.state = state.data;
-            }
-            if (input?.success) {
-              if (input.data.background === true) events.invalidRoute = true;
-              if (input.data.workdir !== undefined && input.data.workdir !== cwd) {
-                if (result?.success) events.invalidRoute = true;
-                else {
-                  const warning =
-                    "A shell call requested an unexpected work directory but did not start; corrected retries remain eligible.";
-                  if (!events.warnings.includes(warning)) events.warnings.push(warning);
-                }
-              }
             }
           }
           // Tool IDs are provider call IDs and can repeat across assistant messages.
@@ -878,7 +858,7 @@ export default {
         )
           throw new Error();
       } catch {
-        events.invalidRoute = true;
+        events.error = true;
         events.warnings.push(
           "Exact direct-tool inventory was not verified before the model request.",
         );

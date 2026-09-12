@@ -107,7 +107,7 @@ export async function loadBatch(paths: Paths, id: string): Promise<Batch> {
     const config = { ...z.record(z.string(), z.unknown()).parse(manifestData.config) };
     delete config.githubToolsets;
     manifestData.config = config;
-    manifestData.schemaVersion = 4;
+    manifestData.schemaVersion = 5;
     manifestData.schedule = z
       .array(z.unknown())
       .parse(manifestData.schedule)
@@ -125,7 +125,7 @@ export async function loadBatch(paths: Paths, id: string): Promise<Batch> {
       );
     }
   }
-  if (legacyVersion === 3) manifestData.schemaVersion = 4;
+  if (legacyVersion === 3 || legacyVersion === 4) manifestData.schemaVersion = 5;
   const manifest = manifestSchema.parse(manifestData);
   const results = [];
   for (const entry of await readdir(directory)) {
@@ -136,6 +136,20 @@ export async function loadBatch(paths: Paths, id: string): Promise<Batch> {
       const trial = upgradeTrial(data.trial);
       if (!trial) continue;
       data.trial = trial;
+    }
+    if ([1, 2, 3, 4].includes(Number(legacyVersion))) {
+      const grading = z.record(z.string(), z.unknown()).safeParse(data.grading);
+      if (grading.success) {
+        delete grading.data.routeValid;
+        data.grading = grading.data;
+      }
+      if (data.status === "invalid-route" || data.status === "invalid-schema") {
+        const metrics = z.record(z.string(), z.unknown()).safeParse(data.metrics);
+        data.status =
+          metrics.success && metrics.data.complete === true ? "complete" : "usage-incomplete";
+        if (grading.success)
+          data.success = grading.data.schemaValid === true && grading.data.valueMatches === true;
+      }
     }
     const result = resultSchema.parse(data);
     if (!result.session) {

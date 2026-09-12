@@ -135,13 +135,7 @@ async function prepare(
     await cleanup();
     throw error;
   }
-  const events = new EventCollector(
-    config,
-    trial,
-    catalog?.names ?? [],
-    token,
-    catalog?.readOnlyNames ?? [],
-  );
+  const events = new EventCollector(trial, token);
   return {
     ...prepared,
     configPath: join(directory, "bench.json"),
@@ -301,14 +295,7 @@ export interface RunOptions {
 }
 
 export function shouldStopBatch(status: Result["status"]): boolean {
-  return [
-    "invalid-route",
-    "invalid-schema",
-    "fixture-drift",
-    "cancelled",
-    "timeout",
-    "failed",
-  ].includes(status);
+  return ["fixture-drift", "cancelled", "timeout", "failed"].includes(status);
 }
 
 export async function run(config: Config, paths: Paths, options: RunOptions): Promise<Batch> {
@@ -356,7 +343,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
     ).filter((trial) => options.workloads.includes(trial.workload));
     const batch: Batch = {
       manifest: {
-        schemaVersion: 4,
+        schemaVersion: 5,
         id,
         createdAt: new Date().toISOString(),
         benchmark: options.benchmark,
@@ -508,6 +495,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
             await new Promise((resolve) => setTimeout(resolve, 150));
           }
         }
+        let modelMismatch = false;
         if (usage) {
           result.metrics = usage.metrics;
           result.warnings.push(...usage.warnings);
@@ -515,6 +503,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
             usage.models.length !== 1 ||
             usage.models[0] !== agentProfile(config, trial.agent).model
           ) {
+            modelMismatch = true;
             result.warnings.push("Observed model identities did not match the selected model.");
             result.metrics.complete = false;
           }
@@ -542,26 +531,23 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
               ? gradeSuiteAnswer(events.answer, suiteExpectedSchema.parse(expected))
               : gradeAnswer(events.answer, expectedSchema.parse(expected))
             : { schemaValid: true as const, valueMatches: events.answer.trim() === "OK" };
-        result.grading = { routeValid: events.routeValid, ...answerGrade };
+        result.grading = answerGrade;
         result.success =
           processResult.code === 0 &&
           !events.error &&
-          result.grading.routeValid &&
+          !events.malformed &&
+          !modelMismatch &&
           result.grading.schemaValid &&
           result.grading.valueMatches;
         result.status = options.signal.aborted
           ? "cancelled"
           : processResult.stopped
             ? "timeout"
-            : processResult.code !== 0 || events.error
+            : processResult.code !== 0 || events.error || events.malformed || modelMismatch
               ? "failed"
-              : !result.grading.routeValid
-                ? "invalid-route"
-                : !result.grading.schemaValid
-                  ? "invalid-schema"
-                  : !result.metrics?.complete
-                    ? "usage-incomplete"
-                    : "complete";
+              : !result.metrics?.complete
+                ? "usage-incomplete"
+                : "complete";
         if (result.status === "timeout" || result.status === "cancelled") result.success = false;
         if (!result.grading.schemaValid)
           result.warnings.push("Final answer did not comply with the required answer schema.");
@@ -569,8 +555,6 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
           result.warnings.push(
             "Final answer complied with the schema but did not match the expected values.",
           );
-        if (!events.routeValid)
-          result.warnings.push("Required read-only tool route was not verified.");
         if (processResult.code !== 0)
           result.warnings.push(
             `${agentLabel(trial.agent)} exited unsuccessfully. Inspect private stderr.txt in the attempt directory.`,

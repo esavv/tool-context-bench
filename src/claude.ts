@@ -111,23 +111,13 @@ export class ClaudeCollector {
   private fallbackAnswer = "";
 
   constructor(
-    config: Config,
     private readonly trial: Trial,
     private readonly catalog: Catalog | undefined,
     private readonly token: string,
     sessionID: string,
-    benchmark: Benchmark = "github",
     private readonly extraSecrets: string[] = [],
   ) {
-    this.events = new EventCollector(
-      config,
-      trial,
-      catalog?.names ?? [],
-      token,
-      catalog?.readOnlyNames ?? [],
-      benchmark,
-      extraSecrets,
-    );
+    this.events = new EventCollector(trial, token, extraSecrets);
     this.events.sessionID = sessionID;
   }
 
@@ -206,7 +196,7 @@ export class ClaudeCollector {
       return;
     }
     if (event.parent_tool_use_id != null) {
-      this.events.invalidRoute = true;
+      this.events.error = true;
       this.warn("Claude emitted a subagent event; request accounting is incomplete.");
     }
     if (
@@ -235,17 +225,18 @@ export class ClaudeCollector {
         expected.some((name) => !tools.includes(name)) ||
         tools.some((name) => typeof name !== "string" || !expected.includes(name))
       ) {
-        this.warn("Claude init tools did not match the expected route catalog.");
+        this.events.error = true;
+        this.warn("Claude init tools did not match the expected tool catalog.");
       }
       for (const name of tools) {
         if (typeof name !== "string") continue;
         if (/tool.?search/i.test(name) && this.trial.technique !== "tool-search") {
-          this.events.invalidRoute = true;
+          this.events.error = true;
           this.warn("Claude tool search was observed despite being disabled.");
         }
         if (/code.?mode|execute.?code|executor/i.test(name)) {
           this.events.codeMode = true;
-          this.events.invalidRoute = true;
+          this.events.error = true;
           this.warn("Claude code mode was observed.");
         }
       }
@@ -278,16 +269,20 @@ export class ClaudeCollector {
       if (Array.isArray(event.mcp_servers)) {
         for (const value of event.mcp_servers) {
           const server = object(value);
-          if (
+          const invalid =
             !["github", "supabase", "cloudflare", "stripe"].includes(String(server.name)) ||
             this.trial.technique === "bash" ||
-            server.status !== "connected"
-          )
+            server.status !== "connected";
+          if (invalid) {
+            this.events.error = true;
             this.warn("Claude init reported an unexpected or disconnected MCP server.");
+          }
         }
       }
-      if (this.trial.technique !== "bash" && !this.catalog?.names.length)
+      if (this.trial.technique !== "bash" && !this.catalog?.names.length) {
+        this.events.error = true;
         this.warn("Claude MCP catalog is missing.");
+      }
       if (!this.incomplete)
         this.warnings.add(
           this.trial.technique === "tool-search"
@@ -349,12 +344,12 @@ export class ClaudeCollector {
         )
           this.warn("Claude called a tool outside the expected catalog.");
         if (/tool.?search/i.test(name) && this.trial.technique !== "tool-search") {
-          this.events.invalidRoute = true;
+          this.events.error = true;
           this.warn("Claude tool search was observed despite being disabled.");
         }
         if (/code.?mode|execute.?code|executor/i.test(name)) {
           this.events.codeMode = true;
-          this.events.invalidRoute = true;
+          this.events.error = true;
           this.warn("Claude code mode was observed.");
         }
         if (!this.completed.has(block.id) && !this.pending.has(block.id)) {
@@ -394,7 +389,6 @@ export class ClaudeCollector {
           : this.fallbackAnswer;
       if (typeof event.result !== "string") this.warn("Claude final answer was missing.");
       if (Array.isArray(event.permission_denials) && event.permission_denials.length > 0) {
-        this.events.invalidRoute = true;
         this.warn("Claude reported denied tool permissions.");
       }
     }
@@ -403,6 +397,7 @@ export class ClaudeCollector {
   collect(): AgentUsage {
     if (!this.initialized) this.warn("Claude init evidence is missing.");
     if (!this.finished) {
+      this.events.error = true;
       this.warn("Claude final result is missing.");
       this.events.answer = this.fallbackAnswer;
     }
@@ -557,12 +552,10 @@ export async function prepareClaude(
   const profile = agentProfile(config, "claude");
   const sessionID = randomUUID();
   const collector = new ClaudeCollector(
-    config,
     trial,
     catalog,
     token,
     sessionID,
-    benchmark,
     credentials ? Object.values(credentials) : [],
   );
   // Match the other harnesses' CLI surface; the restricted PAT remains the remote write boundary.
@@ -649,7 +642,6 @@ export async function prepareClaude(
       "--prompt-suggestions",
       "false",
       "--no-chrome",
-      "--no-session-persistence",
       "--include-partial-messages",
       "--output-format",
       "stream-json",
@@ -674,7 +666,7 @@ export async function prepareClaude(
         ? "Strict explicit MCP config; native ToolSearch enabled with MCP_DISCOVERY_CACHE=0. Init and runtime evidence are checked by the collector."
         : "Strict explicit MCP config; eager tools with ENABLE_TOOL_SEARCH=false and MCP_DISCOVERY_CACHE=0. Init must include all expected tools and no ToolSearch; runtime evidence is checked by the collector.",
       "Terminal title, background tasks, nonessential traffic, updates, and compaction are disabled; permission prompts, slash commands, suggestions, and Chrome are disabled.",
-      "Native stream-json stdout is captured as redacted JSONL by the runner, not SQLite. Session persistence is disabled; no daily transcript cleanup is performed.",
+      "Native stream-json stdout is captured as redacted JSONL by the runner. The unredacted native session is retained in shared Claude history for inspection.",
     ],
     events: collector.events,
     onLine: (line) => collector.line(line),

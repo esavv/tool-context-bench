@@ -26,7 +26,6 @@ const token = "synthetic-private-token";
 const catalog: Catalog = {
   hash: "synthetic",
   names: ["github_get_commit"],
-  readOnlyNames: ["github_get_commit"],
   tools: [],
   instructions: "",
   server: null,
@@ -101,13 +100,13 @@ it("preserves subscription state without inherited API credentials and writes is
       "--setting-sources",
       "",
       "--strict-mcp-config",
-      "--no-session-persistence",
       "--max-turns",
       "8",
       "mcp__github__*",
       "--print",
     ]),
   );
+  expect(prepared.args).not.toContain("--no-session-persistence");
   expect(bash.args).toContain("Bash(gh api *)");
   expect(bash.args).toContain("Bash(jq *)");
   expect(prepared.events.sessionID).toMatch(/^[0-9a-f-]{36}$/);
@@ -141,7 +140,7 @@ it("preserves subscription state without inherited API credentials and writes is
 });
 
 it("counts stream snapshots once, keeps completed usage, and joins tool results without exporting output", () => {
-  const collector = new ClaudeCollector(config, trial, undefined, token, sessionID);
+  const collector = new ClaudeCollector(trial, undefined, token, sessionID);
   const send = (event: unknown) => collector.line(JSON.stringify(event));
   const stream = (event: unknown) => send({ type: "stream_event", session_id: sessionID, event });
   send({
@@ -233,14 +232,12 @@ it("counts stream snapshots once, keeps completed usage, and joins tool results 
   expect(collector.events.tools).toEqual([
     { name: "bash", status: "completed", command: "gh api repos/fixture/repo/commits/main" },
   ]);
-  expect(collector.events.routeValid).toBe(true);
   expect(JSON.stringify([usage, collector.events.safeEvents])).not.toContain(token);
   expect(collector.collect()).toEqual(usage);
 });
 
 it("accepts Claude tool search with the complete callable MCP inventory", () => {
   const collector = new ClaudeCollector(
-    config,
     { ...trial, technique: "tool-search" },
     catalog,
     token,
@@ -260,13 +257,12 @@ it("accepts Claude tool search with the complete callable MCP inventory", () => 
     "Claude init confirmed native ToolSearch and the expected MCP callable inventory.",
   );
   expect(usage.warnings).not.toContain(
-    "Claude init tools did not match the expected route catalog.",
+    "Claude init tools did not match the expected tool catalog.",
   );
 });
 
 it("marks unexpected discovery and missing requests incomplete, reconciles totals, and fails pending MCP calls", () => {
   const collector = new ClaudeCollector(
-    config,
     { ...trial, technique: "mcp-filter-readonly" },
     catalog,
     token,
@@ -322,7 +318,6 @@ it("marks unexpected discovery and missing requests incomplete, reconciles total
     { name: "github_get_commit", status: "completed" },
     { name: "github_get_commit", status: "error" },
   ]);
-  expect(collector.events.invalidRoute).toBe(true);
   expect(collector.events.codeMode).toBe(true);
   expect(collector.events.error).toBe(true);
   expect(collector.events.answer).toBe("");

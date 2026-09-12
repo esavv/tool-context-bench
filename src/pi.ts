@@ -41,15 +41,7 @@ export async function preparePi(
   const cwd = join(directory, "work");
   const dataPath = join(directory, "pi-events.jsonl");
   await mkdir(cwd, { recursive: true, mode: 0o700 });
-  const events = new EventCollector(
-    config,
-    trial,
-    [],
-    credentials.github,
-    [],
-    "suite",
-    Object.values(credentials),
-  );
+  const events = new EventCollector(trial, credentials.github, Object.values(credentials));
   const requests: Array<z.infer<typeof usageSchema> & { model: string }> = [];
   const pending = new Map<string, { name: string; command?: string }>();
   return {

@@ -15,7 +15,7 @@ function result(id: string, overrides: Partial<Result> = {}): Result {
     answer: "OK",
     tools: [],
     codeMode: "not-observed",
-    grading: { routeValid: true, schemaValid: true, valueMatches: true },
+    grading: { schemaValid: true, valueMatches: true },
     metrics: usage(),
     ...overrides,
   };
@@ -40,7 +40,7 @@ function usage(overrides: Partial<Metrics> = {}): Metrics {
 function batch(results: Result[]): Batch {
   return {
     manifest: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       id: "batch-1",
       createdAt: "2026-09-09T00:00:00Z",
       benchmark: "github",
@@ -388,7 +388,7 @@ describe("summarize", () => {
         result("good"),
         result("value-failure", {
           success: false,
-          grading: { routeValid: true, schemaValid: true, valueMatches: false },
+          grading: { schemaValid: true, valueMatches: false },
           metrics: usage({ totalTokens: 900 }),
         }),
         result("partial", { status: "usage-incomplete", metrics: usage({ complete: false }) }),
@@ -435,8 +435,6 @@ describe("summarize", () => {
     "timeout",
     "cancelled",
     "fixture-drift",
-    "invalid-route",
-    "invalid-schema",
     "usage-incomplete",
   ];
   it.each(failureStatuses)("keeps %s visible", (status) => {
@@ -479,7 +477,6 @@ describe("textReport", () => {
     expect(text).toContain("Database: /runs/a/opencode.db");
     expect(text).toContain("Work directory: /runs/a/work");
     expect(text).toContain("Route: bash | Code Mode: used");
-    expect(text).toContain("Route verified: yes");
     expect(text).toContain("Schema compliant: yes");
     expect(text).toContain("Values accurate: yes");
     expect(text).toContain("Inspect in agent:");
@@ -492,7 +489,7 @@ describe("textReport", () => {
     expect(text).not.toContain("\u001b");
   });
 
-  it("builds OpenCode 2 inspection commands and explains unavailable sessions", () => {
+  it("builds OpenCode 2 and Claude inspection commands", () => {
     const opencode2 = result("v2", {
       trial: {
         id: "v2",
@@ -517,12 +514,11 @@ describe("textReport", () => {
       "opencode2 --standalone --session 'ses_test'",
     );
     expect(
-      sessionInspection(
-        result("claude", {
-          trial: { ...opencode2.trial, agent: "claude" },
-        }),
-      ).unavailable,
-    ).toContain("persistence was disabled");
+      sessionInspection({
+        ...opencode2,
+        trial: { ...opencode2.trial, agent: "claude" },
+      }).command,
+    ).toBe("claude --resume 'ses_test'");
   });
   it("shows ranges and unknown failed samples, and neutralizes terminal controls", () => {
     const text = textReport(
@@ -569,7 +565,6 @@ describe("csvReport", () => {
     });
     expect(records[1]).toMatchObject({
       telemetry_complete: "false",
-      route_valid: "true",
       schema_valid: "true",
       value_matches: "true",
       totalTokens: "330",

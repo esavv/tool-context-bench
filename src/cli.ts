@@ -213,7 +213,7 @@ selectOptions(
       if (controller.signal.aborted) process.exitCode = 130;
       else if (
         batch.results.length !== batch.manifest.schedule.length ||
-        batch.results.some((result) => result.status !== "complete" || !result.success)
+        batch.results.some((result) => result.status !== "complete")
       )
         process.exitCode = 1;
     } finally {

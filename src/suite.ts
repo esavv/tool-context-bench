@@ -139,11 +139,6 @@ export async function readSuiteCatalog(
     const names = catalogs.flatMap((catalog) =>
       catalog.tools.map((tool) => `${catalog.name}_${tool.name}`),
     );
-    const readOnlyNames = catalogs.flatMap((catalog) =>
-      catalog.tools
-        .filter((tool) => tool.annotations?.readOnlyHint === true)
-        .map((tool) => `${catalog.name}_${tool.name}`),
-    );
     const evidence = catalogs.map(({ name, tools: serverTools, instructions, server }) => ({
       name,
       tools: serverTools,
@@ -153,7 +148,6 @@ export async function readSuiteCatalog(
     return {
       hash: createHash("sha256").update(JSON.stringify(evidence)).digest("hex"),
       names,
-      readOnlyNames,
       tools,
       instructions: "",
       server: evidence,

@@ -53,14 +53,12 @@ export type Metrics = z.infer<typeof metricSchema>;
 export const gradingSchema = z.discriminatedUnion("schemaValid", [
   z
     .object({
-      routeValid: z.boolean(),
       schemaValid: z.literal(false),
       valueMatches: z.null(),
     })
     .strict(),
   z
     .object({
-      routeValid: z.boolean(),
       schemaValid: z.literal(true),
       valueMatches: z.boolean(),
     })
@@ -77,8 +75,6 @@ export const resultSchema = z.object({
     "timeout",
     "cancelled",
     "fixture-drift",
-    "invalid-route",
-    "invalid-schema",
     "usage-incomplete",
   ]),
   success: z.boolean(),
@@ -107,7 +103,7 @@ export const resultSchema = z.object({
 export type Result = z.infer<typeof resultSchema>;
 
 export const manifestSchema = z.object({
-  schemaVersion: z.literal(4),
+  schemaVersion: z.literal(5),
   id: z.string(),
   createdAt: z.string(),
   benchmark: benchmarkSchema.default("github"),

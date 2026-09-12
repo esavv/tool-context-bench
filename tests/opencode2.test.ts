@@ -274,7 +274,6 @@ it.each<Technique>(["bash", "mcp-raw", "mcp-filter", "mcp-filter-readonly"])(
       {
         hash: "fixture",
         names: ["github_get_commit"],
-        readOnlyNames: ["github_get_commit"],
         tools: [],
         instructions: "",
         server: null,
@@ -318,7 +317,6 @@ it.each<Technique>(["bash", "mcp-raw", "mcp-filter", "mcp-filter-readonly"])(
         },
       }),
     );
-    expect(prepared.events.routeValid).toBe(true);
     using db = new DatabaseSync(database);
     db.prepare(
       "INSERT INTO session_v2 VALUES (?, ?, NULL, 'succeeded', NULL, 100, 20, 5, 40, 10)",
@@ -352,50 +350,6 @@ it.each<Technique>(["bash", "mcp-raw", "mcp-filter", "mcp-filter-readonly"])(
     expect(artifact.trim().split("\n")).toHaveLength(1);
     expect(JSON.parse(artifact)).toMatchObject({ metrics: usage.metrics });
     expect(artifact).not.toContain("synthetic-refresh");
-    if (technique === "bash") {
-      prepared.onLine(
-        JSON.stringify({
-          type: "tool_use",
-          sessionID,
-          part: {
-            id: "call_wrong_workdir_failed",
-            messageID: "msg_2",
-            tool: "shell",
-            state: {
-              status: "error",
-              input: {
-                command: "gh api repos/fixture/repo/commits/main",
-                workdir: "/missing/work",
-              },
-            },
-          },
-        }),
-      );
-      expect(prepared.events.routeValid).toBe(true);
-      expect(prepared.events.warnings).toContain(
-        "A shell call requested an unexpected work directory but did not start; corrected retries remain eligible.",
-      );
-      prepared.onLine(
-        JSON.stringify({
-          type: "tool_use",
-          sessionID,
-          part: {
-            id: "call_wrong_workdir_completed",
-            messageID: "msg_3",
-            tool: "shell",
-            state: {
-              status: "completed",
-              input: {
-                command: "gh api repos/fixture/repo/commits/main",
-                workdir: "/other/work",
-              },
-              metadata: { metadata: { exit: 0 } },
-            },
-          },
-        }),
-      );
-      expect(prepared.events.routeValid).toBe(false);
-    }
     prepared.onLine(
       JSON.stringify({
         type: "tool_use",
@@ -408,7 +362,7 @@ it.each<Technique>(["bash", "mcp-raw", "mcp-filter", "mcp-filter-readonly"])(
       }),
     );
     expect(prepared.events.codeMode).toBe(true);
-    expect(prepared.events.routeValid).toBe(false);
+    expect(prepared.events.error).toBe(true);
     await prepared.cleanup();
     await expect(opencode2Auth(database)).resolves.toBeUndefined();
   },

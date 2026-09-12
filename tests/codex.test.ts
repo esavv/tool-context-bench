@@ -48,7 +48,6 @@ const source = JSON.stringify({ models: [{ slug: "other" }, terra] });
 const catalog: Catalog = {
   hash: "synthetic",
   names: ["github_get_commit", "github_create_issue"],
-  readOnlyNames: ["github_get_commit"],
   tools: [],
   instructions: "",
   server: null,
@@ -309,7 +308,6 @@ it("normalizes shell events and reads only the SQLite-selected thread, deduplica
   expect(prepared.events.sessionID).toBe(session);
   expect(prepared.events.tools).toEqual([{ name: "bash", command, status: "completed" }]);
   expect(prepared.events.answer).toBe("last [REDACTED]");
-  expect(prepared.events.routeValid).toBe(true);
   const one = {
     response_id: "response-1",
     thread_id: session,
@@ -380,7 +378,6 @@ it("retains spent tokens after compaction, flags MCP/search errors, and rejects 
     },
   });
   expect(prepared.events.tools).toEqual([{ name: "github_get_commit", status: "completed" }]);
-  expect(prepared.events.routeValid).toBe(true);
   emit(prepared, {
     type: "item.completed",
     item: { id: "search", type: "tool_search", status: "completed" },
@@ -390,7 +387,6 @@ it("retains spent tokens after compaction, flags MCP/search errors, and rejects 
     item: { id: "code", type: "code_mode", status: "completed" },
   });
   emit(prepared, { type: "turn.failed", error: { message: `private ${token}` } });
-  expect(prepared.events.routeValid).toBe(false);
   expect(prepared.events.codeMode).toBe(true);
   expect(prepared.events.error).toBe(true);
   expect(prepared.events.warnings.join(" ")).toContain("despite direct-tool settings");

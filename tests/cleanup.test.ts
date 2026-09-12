@@ -110,11 +110,11 @@ async function writeBatch(id: string): Promise<Batch> {
     answer: "OK",
     tools: [],
     codeMode: "not-observed",
-    grading: { routeValid: true, schemaValid: true, valueMatches: true },
+    grading: { schemaValid: true, valueMatches: true },
   }));
   const batch: Batch = {
     manifest: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       id,
       createdAt: "2026-09-09T00:00:00Z",
       benchmark: "github",
@@ -351,9 +351,44 @@ describe("view batch loading", () => {
     await writeFile(join(directory, "0.result.json"), JSON.stringify(result));
     await rm(join(directory, "1.result.json"));
     const loaded = await loadBatch(paths, "version-3-batch");
-    expect(loaded.manifest.schemaVersion).toBe(4);
+    expect(loaded.manifest.schemaVersion).toBe(5);
     expect(loaded.results[0]?.grading).toBeNull();
     expect(await readFile(join(directory, "manifest.json"), "utf8")).toBe(JSON.stringify(manifest));
+  });
+
+  it("loads version 4 route failures as answer-graded version 5 results", async () => {
+    const batch = await writeBatch("version-4-batch");
+    const directory = join(paths.results, "version-4-batch");
+    const manifest = { ...batch.manifest, schemaVersion: 4 };
+    const result = {
+      ...batch.results[0],
+      status: "invalid-route",
+      success: false,
+      metrics: {
+        initialInput: 1,
+        totalInput: 1,
+        totalOutput: 1,
+        totalTokens: 2,
+        cacheRead: 0,
+        cacheWrite: 0,
+        freshInput: 1,
+        reasoning: 0,
+        steps: 1,
+        complete: true,
+      },
+      grading: { routeValid: false, schemaValid: true, valueMatches: true },
+    };
+    await writeFile(join(directory, "manifest.json"), JSON.stringify(manifest));
+    await writeFile(join(directory, "0.result.json"), JSON.stringify(result));
+    await rm(join(directory, "1.result.json"));
+    const loaded = await loadBatch(paths, "version-4-batch");
+    expect(loaded.manifest.schemaVersion).toBe(5);
+    expect(loaded.results[0]).toMatchObject({
+      status: "complete",
+      success: true,
+      grading: { schemaValid: true, valueMatches: true },
+    });
+    expect(loaded.results[0]?.grading).not.toHaveProperty("routeValid");
   });
 
   it("keeps the actual filtered/read-only meaning of version 1 MCP results without rewriting them", async () => {

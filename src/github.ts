@@ -58,7 +58,6 @@ export async function readExpected(
 export interface Catalog {
   hash: string;
   names: string[];
-  readOnlyNames: string[];
   tools: unknown[];
   instructions: string;
   server: unknown;
@@ -103,13 +102,6 @@ export async function readCatalog(technique: Technique, token: string): Promise<
     return {
       hash: createHash("sha256").update(JSON.stringify({ tools, instructions })).digest("hex"),
       names: tools.map((tool) => `github_${tool.name}`),
-      readOnlyNames: tools
-        .filter(
-          (tool) =>
-            tool.annotations?.readOnlyHint === true ||
-            (techniqueSettings(technique).readOnly && tool.annotations?.readOnlyHint !== false),
-        )
-        .map((tool) => `github_${tool.name}`),
       tools,
       instructions,
       server,

@@ -101,7 +101,7 @@ The user explicitly chose a separate benchmark OpenCode 2 OAuth login because be
 
 Codex attempts have a private home with an `auth.json` link to the original `$CODEX_HOME/auth.json` or `~/.codex/auth.json`. Normal completion removes the link; recursive runtime removal does not follow it. Generated Codex model descriptors, descriptor hashes, configs, SQLite indexes, and rollout JSONL files are inside the owned attempt directory and are removed by runtime cleanup.
 
-Claude retains its original login and application-state location but disables native session persistence. The benchmark saves a redacted event stream in the attempt directory. Runtime cleanup removes that stream and generated configs, not global Claude application state or its existing Keychain credentials. Cleanup does not undo any normal subscription refresh or global state update performed by an agent.
+Claude retains its original login and application-state location and saves native sessions in shared Claude history for inspection. The benchmark also saves a redacted event stream in the attempt directory. Runtime cleanup removes that stream and generated configs, but it does not remove shared Claude sessions, global application state, or existing Keychain credentials. Cleanup does not undo any normal subscription refresh or global state update performed by an agent.
 
 Preview runtime deletion:
 

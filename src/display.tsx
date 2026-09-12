@@ -179,14 +179,14 @@ function shellQuote(value: string): string {
 export function sessionInspection(result: Result): { command?: string; unavailable?: string } {
   const session = result.session;
   const sessionID = result.sessionID;
-  if (result.trial.agent === "claude") {
-    return { unavailable: "Claude session persistence was disabled; inspect the saved JSONL." };
-  }
   if (result.trial.agent === "pi") {
     return { unavailable: "Pi session persistence was disabled; inspect the saved JSONL." };
   }
   if (!session || !sessionID) {
     return { unavailable: "No native persisted session is available." };
+  }
+  if (result.trial.agent === "claude") {
+    return { command: `claude --resume ${shellQuote(sessionID)}` };
   }
   const env = (values: Record<string, string>) =>
     Object.entries(values)
@@ -243,7 +243,6 @@ function details(result: Result): string[] {
     `Agent: ${agentLabel(result.trial.agent)}`,
     `Session: ${safeText(result.sessionID ?? "unknown")} | ${result.durationMs} ms`,
     `Route: ${result.trial.technique} | Code Mode: ${result.codeMode}`,
-    `Route verified: ${grading === null ? "unknown" : grading.routeValid ? "yes" : "no"}`,
     `Schema compliant: ${grading === null ? "unknown" : grading.schemaValid ? "yes" : "no"}`,
     `Values accurate: ${grading?.valueMatches === null || grading === null ? "unknown" : grading.valueMatches ? "yes" : "no"}`,
     ...(result.session
@@ -289,7 +288,7 @@ export function textReport(batch: Batch): string {
           `${agentLabel(agent)} ${safeText(version)} | ${safeText(model)}`,
       )
       .join(" · "),
-    "Tokens: complete successful samples only.",
+    "Tokens: complete telemetry samples, independent of answer accuracy.",
     "Statistics: median and observed range; totals sum valid samples, not all attempts.",
   ];
   const rows = summarize(batch);
@@ -339,7 +338,6 @@ export function csvReport(batch: Batch): string {
     "trial_id",
     "status",
     "success",
-    "route_valid",
     "schema_valid",
     "value_matches",
     "tried",
@@ -373,7 +371,6 @@ export function csvReport(batch: Batch): string {
       row.success,
       null,
       null,
-      null,
       row.tried,
       row.validSamples,
       row.pending,
@@ -403,7 +400,6 @@ export function csvReport(batch: Batch): string {
         result.trial.id,
         result.status,
         result.success,
-        result.grading?.routeValid ?? null,
         result.grading?.schemaValid ?? null,
         result.grading?.valueMatches ?? null,
         1,
