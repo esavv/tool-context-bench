@@ -36,6 +36,37 @@ import {
   suiteCredentials,
   type SuiteCredentials,
 } from "./suite.js";
+import {
+  executorCatalog,
+  executorVersion,
+  prepareExecutor,
+  type ExecutorConnection,
+} from "./executor.js";
+
+function attachExecutor(
+  prepared: PreparedAgent,
+  executor: ExecutorConnection | undefined,
+): PreparedAgent {
+  if (!executor) return prepared;
+  const cleanupAgent = prepared.cleanup;
+  prepared.cleanup = async () => {
+    try {
+      await cleanupAgent();
+    } finally {
+      await executor.cleanup();
+    }
+  };
+  return prepared;
+}
+
+async function suiteCatalog(
+  config: Config,
+  technique: Technique,
+  credentials: SuiteCredentials,
+): Promise<Catalog> {
+  if (technique !== "executor") return readSuiteCatalog(config, technique, credentials);
+  return executorCatalog(await readSuiteCatalog(config, "mcp-tuned", credentials));
+}
 
 async function verifyConfig(
   binary: string,
@@ -99,77 +130,129 @@ async function prepare(
   benchmark: Benchmark = "github",
   credentials?: SuiteCredentials,
 ): Promise<PreparedAgent> {
-  if (trial.agent === "pi") {
-    if (!credentials) throw new Error("Suite credentials are required for pi.");
-    return preparePi(directory, config, trial, credentials);
-  }
-  if (trial.agent === "claude")
-    return prepareClaude(directory, config, trial, catalog, token, benchmark, credentials);
-  if (trial.agent === "codex")
-    return prepareCodex(directory, config, trial, catalog, token, benchmark, credentials);
-  if (trial.agent === "opencode2")
-    return prepareOpencode2(
+  if (
+    trial.technique === "executor" &&
+    (benchmark !== "suite" || credentials === undefined || catalog === undefined)
+  )
+    throw new Error("Executor requires a suite catalog and credentials.");
+  const executor =
+    trial.technique === "executor" && credentials && catalog
+      ? await prepareExecutor(directory, config, credentials, catalog)
+      : undefined;
+  try {
+    if (trial.agent === "pi") {
+      if (!credentials) throw new Error("Suite credentials are required for pi.");
+      return attachExecutor(await preparePi(directory, config, trial, credentials), executor);
+    }
+    if (trial.agent === "claude")
+      return attachExecutor(
+        await prepareClaude(
+          directory,
+          config,
+          trial,
+          catalog,
+          token,
+          benchmark,
+          credentials,
+          executor,
+        ),
+        executor,
+      );
+    if (trial.agent === "codex")
+      return attachExecutor(
+        await prepareCodex(
+          directory,
+          config,
+          trial,
+          catalog,
+          token,
+          benchmark,
+          credentials,
+          executor,
+        ),
+        executor,
+      );
+    if (trial.agent === "opencode2")
+      return attachExecutor(
+        await prepareOpencode2(
+          directory,
+          config,
+          trial,
+          catalog,
+          token,
+          paths.opencode2Database,
+          binary,
+          benchmark,
+          credentials,
+          executor,
+        ),
+        executor,
+      );
+    if (benchmark === "suite")
+      throw new Error("OpenCode 1 is not supported by the suite benchmark.");
+    const prepared = await prepareAttempt(
       directory,
+      paths.auth,
       config,
       trial,
-      catalog,
-      token,
-      paths.opencode2Database,
-      binary,
-      benchmark,
-      credentials,
+      catalog?.names ?? [],
     );
-  if (benchmark === "suite") throw new Error("OpenCode 1 is not supported by the suite benchmark.");
-  const prepared = await prepareAttempt(directory, paths.auth, config, trial, catalog?.names ?? []);
-  if (trial.technique === "bash") prepared.env.GH_TOKEN = token;
-  else prepared.env.BENCH_GITHUB_TOKEN = token;
-  const expectedConfig = agentConfig(config, trial, catalog?.names ?? []);
-  const expected: unknown = JSON.parse(
-    JSON.stringify(expectedConfig).replaceAll("{env:BENCH_GITHUB_TOKEN}", token),
-  );
-  const cleanup = () =>
-    unlink(join(directory, "data", "opencode", "auth.json")).catch(() => undefined);
-  try {
-    await verifyConfig(binary, prepared, expected);
+    if (trial.technique === "bash") prepared.env.GH_TOKEN = token;
+    else prepared.env.BENCH_GITHUB_TOKEN = token;
+    const expectedConfig = agentConfig(config, trial, catalog?.names ?? []);
+    const expected: unknown = JSON.parse(
+      JSON.stringify(expectedConfig).replaceAll("{env:BENCH_GITHUB_TOKEN}", token),
+    );
+    const cleanup = () =>
+      unlink(join(directory, "data", "opencode", "auth.json")).catch(() => undefined);
+    try {
+      await verifyConfig(binary, prepared, expected);
+    } catch (error) {
+      await cleanup();
+      throw error;
+    }
+    const events = new EventCollector(trial, token);
+    return attachExecutor(
+      {
+        ...prepared,
+        configPath: join(directory, "bench.json"),
+        dataPath: prepared.database,
+        dataKind: "sqlite",
+        args: [
+          "run",
+          "--pure",
+          "--format",
+          "json",
+          "--agent",
+          "bench",
+          "--model",
+          config.model,
+          "--variant",
+          config.variant,
+          "--title",
+          "tool-context-bench",
+        ],
+        settings: [
+          `OpenCode ${config.opencodeVersion}; tool search unavailable/disabled; Code Mode disabled.`,
+          ...sessionDetails(directory, expectedConfig, config.variant).settings,
+        ],
+        events,
+        onLine: (line) => events.line(line),
+        collect: async () => {
+          if (!events.sessionID) throw new Error("OpenCode did not report a session ID.");
+          return {
+            ...collectUsage(prepared.database, events.sessionID),
+            artifactPath: prepared.database,
+          };
+        },
+        cleanup,
+      },
+      executor,
+    );
   } catch (error) {
-    await cleanup();
+    await executor?.cleanup();
     throw error;
   }
-  const events = new EventCollector(trial, token);
-  return {
-    ...prepared,
-    configPath: join(directory, "bench.json"),
-    dataPath: prepared.database,
-    dataKind: "sqlite",
-    args: [
-      "run",
-      "--pure",
-      "--format",
-      "json",
-      "--agent",
-      "bench",
-      "--model",
-      config.model,
-      "--variant",
-      config.variant,
-      "--title",
-      "tool-context-bench",
-    ],
-    settings: [
-      `OpenCode ${config.opencodeVersion}; tool search unavailable/disabled; Code Mode disabled.`,
-      ...sessionDetails(directory, expectedConfig, config.variant).settings,
-    ],
-    events,
-    onLine: (line) => events.line(line),
-    collect: async () => {
-      if (!events.sessionID) throw new Error("OpenCode did not report a session ID.");
-      return {
-        ...collectUsage(prepared.database, events.sessionID),
-        artifactPath: prepared.database,
-      };
-    },
-    cleanup,
-  };
 }
 
 export async function doctor(
@@ -185,7 +268,10 @@ export async function doctor(
   )
     throw new Error("The selected agent is not supported by this benchmark.");
   const installed = await binaries(config, agents);
-  if (benchmark === "suite") Object.assign(installed.versions, await suiteCliVersions(config));
+  if (benchmark === "suite")
+    Object.assign(installed.versions, await suiteCliVersions(config), {
+      executor: executorVersion,
+    });
   const lines = [
     installed.versions.gh,
     `Repository: ${config.repository}, branch: ${config.branch}`,
@@ -216,11 +302,11 @@ export async function doctor(
       : await readExpected(config, token, installed.gh, join(paths.root, "probe"));
     const techniques =
       benchmark === "suite"
-        ? ["mcp-raw", "mcp-tuned", "tool-search"]
+        ? ["mcp-raw", "mcp-tuned", "tool-search", "executor"]
         : ["mcp-raw", "mcp-filter", "mcp-filter-readonly"];
     for (const technique of z.array(techniqueSchema).parse(techniques)) {
       const catalog = credentials
-        ? await readSuiteCatalog(config, technique, credentials)
+        ? await suiteCatalog(config, technique, credentials)
         : await readCatalog(technique, token);
       lines.push(`${technique}: ${catalog.names.length} tools; SHA-256 ${catalog.hash}`);
     }
@@ -304,7 +390,9 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
   try {
     const installed = await binaries(config, options.agents);
     if (options.benchmark === "suite")
-      Object.assign(installed.versions, await suiteCliVersions(config));
+      Object.assign(installed.versions, await suiteCliVersions(config), {
+        executor: executorVersion,
+      });
     if (
       (options.benchmark === "suite" && options.agents.includes("opencode")) ||
       (options.benchmark === "github" && options.agents.includes("pi"))
@@ -328,7 +416,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
     for (const technique of options.techniques) {
       if (technique !== "bash")
         catalogs[technique] = credentials
-          ? await readSuiteCatalog(config, technique, credentials)
+          ? await suiteCatalog(config, technique, credentials)
           : await readCatalog(technique, token);
     }
     const id = `${new Date().toISOString().replace(/[:.]/g, "-")}_${randomUUID().slice(0, 8)}`;
@@ -385,7 +473,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
       }
       if (catalog) {
         const current = credentials
-          ? await readSuiteCatalog(config, trial.technique, credentials)
+          ? await suiteCatalog(config, trial.technique, credentials)
           : await readCatalog(trial.technique, token);
         if (current.hash !== catalog.hash) {
           options.progress("Stopped: MCP catalog changed.");

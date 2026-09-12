@@ -8,6 +8,7 @@ import { agentProfile } from "./agents.js";
 import { configSchema, type Config } from "./config.js";
 import { redact } from "./credentials.js";
 import { EventCollector } from "./events.js";
+import type { ExecutorConnection } from "./executor.js";
 import { MCP_URL, type Catalog } from "./github.js";
 import { execute, minimalEnvironment } from "./process.js";
 import { suiteBinDirectory, suiteServers, type SuiteCredentials } from "./suite.js";
@@ -234,7 +235,10 @@ export class ClaudeCollector {
           this.events.error = true;
           this.warn("Claude tool search was observed despite being disabled.");
         }
-        if (/code.?mode|execute.?code|executor/i.test(name)) {
+        if (
+          /code.?mode|execute.?code|executor/i.test(name) &&
+          this.trial.technique !== "executor"
+        ) {
           this.events.codeMode = true;
           this.events.error = true;
           this.warn("Claude code mode was observed.");
@@ -270,7 +274,11 @@ export class ClaudeCollector {
         for (const value of event.mcp_servers) {
           const server = object(value);
           const invalid =
-            !["github", "supabase", "cloudflare", "stripe"].includes(String(server.name)) ||
+            !(
+              this.trial.technique === "executor"
+                ? ["executor"]
+                : ["github", "supabase", "cloudflare", "stripe"]
+            ).includes(String(server.name)) ||
             this.trial.technique === "bash" ||
             server.status !== "connected";
           if (invalid) {
@@ -346,6 +354,13 @@ export class ClaudeCollector {
         if (/tool.?search/i.test(name) && this.trial.technique !== "tool-search") {
           this.events.error = true;
           this.warn("Claude tool search was observed despite being disabled.");
+        }
+        if (/executor/i.test(name)) {
+          this.events.codeMode = true;
+          if (this.trial.technique !== "executor") {
+            this.events.error = true;
+            this.warn("Claude Executor use was observed outside an Executor trial.");
+          }
         }
         if (/code.?mode|execute.?code|executor/i.test(name)) {
           this.events.codeMode = true;
@@ -489,6 +504,7 @@ export async function prepareClaude(
   token: string,
   benchmark: Benchmark = "github",
   credentials?: SuiteCredentials,
+  executor?: ExecutorConnection,
 ): Promise<PreparedAgent> {
   config = configSchema.parse(config);
   if (trial.agent !== "claude") throw new Error("Expected a Claude trial.");
@@ -525,24 +541,26 @@ export async function prepareClaude(
         mcpServers:
           trial.technique === "bash"
             ? {}
-            : benchmark === "suite" && credentials
-              ? Object.fromEntries(
-                  Object.entries(
-                    suiteServers(config, trial.technique, {
-                      github: "${BENCH_GITHUB_TOKEN}",
-                      supabase: "${BENCH_SUPABASE_TOKEN}",
-                      cloudflare: "${BENCH_CLOUDFLARE_TOKEN}",
-                      stripe: "${BENCH_STRIPE_TOKEN}",
-                    }),
-                  ).map(([name, server]) => [name, { type: "http", ...server }]),
-                )
-              : {
-                  github: {
-                    type: "http",
-                    url: MCP_URL,
-                    headers: mcpHeaders(trial.technique, "${BENCH_GITHUB_TOKEN}"),
+            : executor
+              ? { executor: { type: "http", url: executor.url, headers: executor.headers } }
+              : benchmark === "suite" && credentials
+                ? Object.fromEntries(
+                    Object.entries(
+                      suiteServers(config, trial.technique, {
+                        github: "${BENCH_GITHUB_TOKEN}",
+                        supabase: "${BENCH_SUPABASE_TOKEN}",
+                        cloudflare: "${BENCH_CLOUDFLARE_TOKEN}",
+                        stripe: "${BENCH_STRIPE_TOKEN}",
+                      }),
+                    ).map(([name, server]) => [name, { type: "http", ...server }]),
+                  )
+                : {
+                    github: {
+                      type: "http",
+                      url: MCP_URL,
+                      headers: mcpHeaders(trial.technique, "${BENCH_GITHUB_TOKEN}"),
+                    },
                   },
-                },
       },
       null,
       2,
@@ -587,9 +605,11 @@ export async function prepareClaude(
             "mcp__cloudflare__*",
             "mcp__stripe__*",
           ]
-        : benchmark === "suite"
-          ? ["mcp__github__*", "mcp__supabase__*", "mcp__cloudflare__*", "mcp__stripe__*"]
-          : ["mcp__github__*"];
+        : trial.technique === "executor"
+          ? ["mcp__executor__execute", "mcp__executor__skills"]
+          : benchmark === "suite"
+            ? ["mcp__github__*", "mcp__supabase__*", "mcp__cloudflare__*", "mcp__stripe__*"]
+            : ["mcp__github__*"];
   return {
     directory,
     cwd,
@@ -607,7 +627,7 @@ export async function prepareClaude(
       GH_PROMPT_DISABLED: "1",
       GH_HOST: "github.com",
       ...(trial.technique === "bash" ? { GH_TOKEN: token } : { BENCH_GITHUB_TOKEN: token }),
-      ...(credentials
+      ...(credentials && trial.technique !== "executor"
         ? {
             BENCH_SUPABASE_TOKEN: credentials.supabase,
             BENCH_CLOUDFLARE_TOKEN: credentials.cloudflare,

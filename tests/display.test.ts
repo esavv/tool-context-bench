@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { csvReport, sessionInspection, statistics, summarize, textReport } from "../src/display.js";
+import {
+  csvReport,
+  sessionInspection,
+  statistics,
+  summarize,
+  techniqueLabel,
+  textReport,
+} from "../src/display.js";
 import type { Batch, Metrics, Result, Trial } from "../src/types.js";
 import { batchFields, combineBatches, selectionProblem } from "../src/batches.js";
 
@@ -109,6 +116,9 @@ function parseCsv(csv: string): Record<string, string>[] {
 }
 
 describe("statistics", () => {
+  it("uses the explicit Executor code-execution label", () => {
+    expect(techniqueLabel("executor")).toBe("Executor (code execution)");
+  });
   it("keeps unavailable values distinct from measured zero", () => {
     expect(statistics([null, NaN, Infinity, -1])).toEqual({
       n: 0,

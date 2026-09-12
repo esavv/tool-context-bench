@@ -88,7 +88,12 @@ export class EventCollector {
       status,
       ...(command === undefined ? {} : { command: redact(command, [this.token]) }),
     });
-    if (/code.?mode|execute.?code|executor/.test(name)) this.codeMode = true;
+    if (
+      /code.?mode|execute.?code/.test(name) ||
+      (/executor/.test(name) &&
+        !(this.trial.technique === "executor" && /executor(?:__|_)skills/.test(name)))
+    )
+      this.codeMode = true;
     if (this.trial.technique !== "bash" && name === "bash" && command !== undefined) {
       const clis = serviceClis(command);
       if (clis.length)

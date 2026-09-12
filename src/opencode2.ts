@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { AgentUsage, PreparedAgent } from "./adapter.js";
 import type { Config, Paths } from "./config.js";
 import { EventCollector } from "./events.js";
+import type { ExecutorConnection } from "./executor.js";
 import { MCP_URL, type Catalog } from "./github.js";
 import { execute, minimalEnvironment } from "./process.js";
 import { mcpHeaders, techniqueSchema } from "./techniques.js";
@@ -584,6 +585,7 @@ export async function prepareOpencode2(
   binary: string,
   benchmark: Benchmark = "github",
   credentials?: SuiteCredentials,
+  executor?: ExecutorConnection,
 ): Promise<PreparedAgent> {
   techniqueSchema.parse(trial.technique);
   if (config.model !== "openai/gpt-5.6-terra" || config.maxSteps !== 8)
@@ -609,7 +611,10 @@ export async function prepareOpencode2(
       ? { PATH: `${suiteBinDirectory}:${isolatedEnvironment(runtime, dataPath).PATH}` }
       : {}),
     ...(bash ? { GH_TOKEN: token } : { BENCH_GITHUB_TOKEN: token }),
-    ...(credentials
+    ...(executor
+      ? { BENCH_EXECUTOR_TOKEN: executor.headers.Authorization?.replace(/^Bearer /, "") }
+      : {}),
+    ...(credentials && trial.technique !== "executor"
       ? {
           BENCH_SUPABASE_TOKEN: credentials.supabase,
           BENCH_CLOUDFLARE_TOKEN: credentials.cloudflare,
@@ -705,39 +710,51 @@ export async function prepareOpencode2(
         mcp: {
           servers: bash
             ? {}
-            : benchmark === "suite" && credentials
-              ? Object.fromEntries(
-                  Object.entries(
-                    suiteServers(config, trial.technique, {
-                      github: "{env:BENCH_GITHUB_TOKEN}",
-                      supabase: "{env:BENCH_SUPABASE_TOKEN}",
-                      cloudflare: "{env:BENCH_CLOUDFLARE_TOKEN}",
-                      stripe: "{env:BENCH_STRIPE_TOKEN}",
-                    }),
-                  ).map(([name, server]) => [
-                    name,
-                    {
-                      type: "remote",
-                      url: server.url,
-                      disabled: false,
-                      oauth: false,
-                      codemode: trial.technique === "tool-search",
-                      headers: server.headers,
-                      timeout: { startup: 30000, catalog: 30000, execution: 30000 },
-                    },
-                  ]),
-                )
-              : {
-                  github: {
+            : executor
+              ? {
+                  executor: {
                     type: "remote",
-                    url: MCP_URL,
+                    url: executor.url,
                     disabled: false,
                     oauth: false,
                     codemode: false,
-                    headers: mcpHeaders(trial.technique, "{env:BENCH_GITHUB_TOKEN}"),
+                    headers: { Authorization: "Bearer {env:BENCH_EXECUTOR_TOKEN}" },
                     timeout: { startup: 30000, catalog: 30000, execution: 30000 },
                   },
-                },
+                }
+              : benchmark === "suite" && credentials
+                ? Object.fromEntries(
+                    Object.entries(
+                      suiteServers(config, trial.technique, {
+                        github: "{env:BENCH_GITHUB_TOKEN}",
+                        supabase: "{env:BENCH_SUPABASE_TOKEN}",
+                        cloudflare: "{env:BENCH_CLOUDFLARE_TOKEN}",
+                        stripe: "{env:BENCH_STRIPE_TOKEN}",
+                      }),
+                    ).map(([name, server]) => [
+                      name,
+                      {
+                        type: "remote",
+                        url: server.url,
+                        disabled: false,
+                        oauth: false,
+                        codemode: trial.technique === "tool-search",
+                        headers: server.headers,
+                        timeout: { startup: 30000, catalog: 30000, execution: 30000 },
+                      },
+                    ]),
+                  )
+                : {
+                    github: {
+                      type: "remote",
+                      url: MCP_URL,
+                      disabled: false,
+                      oauth: false,
+                      codemode: false,
+                      headers: mcpHeaders(trial.technique, "{env:BENCH_GITHUB_TOKEN}"),
+                      timeout: { startup: 30000, catalog: 30000, execution: 30000 },
+                    },
+                  },
         },
       },
       null,
@@ -775,7 +792,11 @@ export default {
         binary,
         env,
         cwd,
-        benchmark === "suite" ? ["github", "supabase", "cloudflare", "stripe"] : ["github"],
+        executor
+          ? ["executor"]
+          : benchmark === "suite"
+            ? ["github", "supabase", "cloudflare", "stripe"]
+            : ["github"],
       );
   const events = new EventCollector(trial, token, credentials ? Object.values(credentials) : []);
   return {
@@ -793,7 +814,9 @@ export default {
       `Native SQLite OPENCODE_DB=${dataPath} holds sessions and OAuth; native refresh writes are permitted there only. Do not export or copy this DB. collect().artifactPath is the safe JSONL artifact.`,
       trial.technique === "tool-search"
         ? "Integrated MCP search plus Code Mode: MCP codemode=true and execute is the only exposed service mechanism."
-        : "Direct shell or MCP definitions only; MCP codemode=false; execute denied before tool snapshot; no Code Mode catalog.",
+        : trial.technique === "executor"
+          ? "Executor MCP exposes executor_execute and executor_skills; native execute is denied and Executor performs the required code execution."
+          : "Direct shell or MCP definitions only; MCP codemode=false; execute denied before tool snapshot; no Code Mode catalog.",
       "steps=8 (eighth logical step is text-only; retries can add requests); explicit title prevents title generation.",
       "No OS sandbox: shell permissions are not a filesystem security boundary.",
       "Native V2 assistant step projections supply usage and model identity, reconciled with session counters; unknown fields remain unknown.",

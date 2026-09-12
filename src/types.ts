@@ -120,6 +120,7 @@ export const manifestSchema = z.object({
     supabase: z.string().optional(),
     wrangler: z.string().optional(),
     stripe: z.string().optional(),
+    executor: z.string().optional(),
     gh: z.string(),
     node: z.string(),
   }),

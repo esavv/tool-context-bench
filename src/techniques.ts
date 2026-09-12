@@ -7,6 +7,7 @@ export const techniqueSchema = z.enum([
   "mcp-filter-readonly",
   "mcp-tuned",
   "tool-search",
+  "executor",
 ]);
 export type Technique = z.infer<typeof techniqueSchema>;
 
@@ -16,7 +17,13 @@ export const githubTechniques: Technique[] = [
   "mcp-filter",
   "mcp-filter-readonly",
 ];
-export const suiteTechniques: Technique[] = ["bash", "mcp-raw", "mcp-tuned", "tool-search"];
+export const suiteTechniques: Technique[] = [
+  "bash",
+  "mcp-raw",
+  "mcp-tuned",
+  "tool-search",
+  "executor",
+];
 
 export function techniqueSettings(technique: Technique) {
   return {

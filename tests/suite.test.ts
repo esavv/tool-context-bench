@@ -45,6 +45,18 @@ it("states the exact suite answer field names", () => {
   expect(text).toContain("Use exactly the field names listed above.");
 });
 
+it("identifies Executor as the only service route for its technique", () => {
+  const text = suitePrompt(config, {
+    id: "claude-executor-task-1",
+    agent: "claude",
+    technique: "executor",
+    workload: "task",
+    repetition: 1,
+  });
+  expect(text).toContain("Use only the configured Executor MCP tools");
+  expect(text).toContain("TypeScript execution mechanism");
+});
+
 it("parses the Supabase functions response envelope", () => {
   const github = {
     sha: "a".repeat(40),

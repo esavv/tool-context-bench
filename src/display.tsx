@@ -26,7 +26,12 @@ const techniques: Trial["technique"][] = [
   "mcp-filter-readonly",
   "mcp-tuned",
   "tool-search",
+  "executor",
 ];
+
+export function techniqueLabel(technique: Trial["technique"]): string {
+  return technique === "executor" ? "Executor (code execution)" : technique;
+}
 
 export interface Statistics {
   n: number;
@@ -241,7 +246,7 @@ function details(result: Result): string[] {
     ...(result.origin ? [`Batch: ${safeText(result.origin.batchID)}`] : []),
     `Agent: ${agentLabel(result.trial.agent)}`,
     `Session: ${safeText(result.sessionID ?? "unknown")} | ${result.durationMs} ms`,
-    `Route: ${result.trial.technique} | Code Mode: ${result.codeMode}`,
+    `Route: ${techniqueLabel(result.trial.technique)} | Code Mode: ${result.codeMode}`,
     `Schema compliant: ${grading === null ? "unknown" : grading.schemaValid ? "yes" : "no"}`,
     `Values accurate: ${grading?.valueMatches === null || grading === null ? "unknown" : grading.valueMatches ? "yes" : "no"}`,
     ...(result.session
@@ -298,7 +303,7 @@ export function textReport(batch: Batch): string {
     lines.push("", `[${workload}]`);
     for (const row of group) {
       lines.push(
-        `${row.technique} | ${agentLabel(row.agent)} | ${counts(row)}`,
+        `${techniqueLabel(row.technique)} | ${agentLabel(row.agent)} | ${counts(row)}`,
         `  ${statuses(row)}`,
       );
       for (const { key, label } of metrics) {
@@ -876,7 +881,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       </Box>
       {detail ? (
         <Panel
-          title={`${workload} / ${row?.technique ?? "none"} / ${row ? agentLabel(row.agent) : "none"} · attempt ${results.length ? attempt + 1 : 0}/${results.length}`}
+          title={`${workload} / ${row ? techniqueLabel(row.technique) : "none"} / ${row ? agentLabel(row.agent) : "none"} · attempt ${results.length ? attempt + 1 : 0}/${results.length}`}
           width={width}
         >
           {lines.slice(top, top + pageSize).map((line, index) => (
@@ -908,7 +913,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
           {visibleGroups.map((group) => (
             <Box key={group[0]?.technique} flexDirection="column">
               <Text bold {...inkColor(palette.white)}>
-                {group[0]?.technique}
+                {group[0] ? techniqueLabel(group[0].technique) : ""}
               </Text>
               <Text> </Text>
               {group.map((item) => {

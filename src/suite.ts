@@ -365,9 +365,11 @@ export function suitePrompt(config: Config, trial: Trial): string {
   const route =
     trial.technique === "bash"
       ? "Use only the installed gh, supabase, wrangler, and stripe CLIs for remote service reads."
-      : trial.technique === "tool-search"
-        ? "Use only native tool discovery and the configured MCP services. OpenCode 2 uses its integrated search and code-mode execute mechanism."
-        : "Use only the configured GitHub, Supabase, Cloudflare, and Stripe MCP tools.";
+      : trial.technique === "executor"
+        ? "Use only the configured Executor MCP tools. Use Executor's TypeScript execution mechanism to discover and call the approved upstream MCP tools."
+        : trial.technique === "tool-search"
+          ? "Use only native tool discovery and the configured MCP services. OpenCode 2 uses its integrated search and code-mode execute mechanism."
+          : "Use only the configured GitHub, Supabase, Cloudflare, and Stripe MCP tools.";
   return `Read these four remote fixtures without changing data:
 - GitHub branch ${config.branch} in ${config.repository}: sha (exact 40-character lowercase hexadecimal tip SHA), subject, committed_at, and source_url.
 - Supabase Edge Function ${config.suite.supabase.edgeFunctionSlug} in project ${config.suite.supabase.projectRef}: id, slug, and status.

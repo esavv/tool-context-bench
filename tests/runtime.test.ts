@@ -408,6 +408,14 @@ describe("EventCollector", () => {
     expect(collector.codeMode).toBe(true);
   });
 
+  it("records Executor execution but not catalog instructions as code use", () => {
+    const collector = new EventCollector(trial("executor"), token);
+    collector.line(toolEvent("executor_skills", "completed", undefined, "skills"));
+    expect(collector.codeMode).toBe(false);
+    collector.line(toolEvent("executor_execute", "completed", undefined, "execute"));
+    expect(collector.codeMode).toBe(true);
+  });
+
   it("redacts answers and commands and exports only event metadata", () => {
     const collector = new EventCollector(trial(), token);
     const secrets = [

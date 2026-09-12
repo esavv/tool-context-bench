@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { AgentUsage, PreparedAgent } from "./adapter.js";
 import type { Config } from "./config.js";
 import { EventCollector } from "./events.js";
+import type { ExecutorConnection } from "./executor.js";
 import { MCP_URL, type Catalog } from "./github.js";
 import { minimalEnvironment } from "./process.js";
 import { techniqueSettings } from "./techniques.js";
@@ -82,6 +83,7 @@ export async function prepareCodex(
   token: string,
   benchmark: Benchmark = "github",
   credentials?: SuiteCredentials,
+  executor?: ExecutorConnection,
 ): Promise<PreparedAgent> {
   if (config.codexVersion !== "0.153.3" || config.codexModel !== "gpt-5.6-terra")
     throw new Error("Codex requires version 0.153.3 and gpt-5.6-terra.");
@@ -114,7 +116,12 @@ export async function prepareCodex(
     GH_PROMPT_DISABLED: "1",
     GH_HOST: "github.com",
     ...(trial.technique === "bash" ? { GH_TOKEN: token } : { BENCH_GITHUB_TOKEN: token }),
-    ...(credentials
+    ...(executor
+      ? {
+          BENCH_EXECUTOR_TOKEN: executor.headers.Authorization?.replace(/^Bearer /, ""),
+        }
+      : {}),
+    ...(credentials && trial.technique !== "executor"
       ? {
           BENCH_SUPABASE_TOKEN: credentials.supabase,
           BENCH_CLOUDFLARE_TOKEN: credentials.cloudflare,
@@ -213,8 +220,14 @@ export async function prepareCodex(
     "workspace_dependencies",
     "guardian_approval",
   ];
-  const configuredServers =
-    benchmark === "suite" && trial.technique !== "bash" && credentials
+  const configuredServers = executor
+    ? {
+        executor: {
+          url: executor.url,
+          headers: { Authorization: "Bearer BENCH_EXECUTOR_TOKEN" },
+        },
+      }
+    : benchmark === "suite" && trial.technique !== "bash" && credentials
       ? suiteServers(config, trial.technique, {
           github: "BENCH_GITHUB_TOKEN",
           supabase: "BENCH_SUPABASE_TOKEN",
@@ -319,7 +332,7 @@ export async function prepareCodex(
     const code = /code.?mode|execute.?code|executor|node_repl|cua_repl/.test(name);
     if (!code && !/^(?:tool_search|web_search)(?:_call)?$/.test(name)) return false;
     events.codeMode ||= code;
-    if (trial.technique !== "tool-search") events.error = true;
+    if (trial.technique !== "tool-search" && trial.technique !== "executor") events.error = true;
     const warning = "Codex search or Code Mode use was observed despite direct-tool settings.";
     if (!events.warnings.includes(warning)) events.warnings.push(warning);
     return true;
