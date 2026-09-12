@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,6 +93,11 @@ async function stop(child: ChildProcess): Promise<void> {
       }, 3_000),
     ),
   ]);
+}
+
+async function cleanup(child: ChildProcess, dataDirectory: string): Promise<void> {
+  await stop(child);
+  await rm(dataDirectory, { recursive: true, force: true });
 }
 
 async function request(
@@ -252,6 +257,11 @@ export async function prepareExecutor(
     }
     await request(origin, token, "/policies", "POST", {
       owner: "org",
+      pattern: "executor.coreTools.connections.list",
+      action: "approve",
+    });
+    await request(origin, token, "/policies", "POST", {
+      owner: "org",
       pattern: "*",
       action: "block",
     });
@@ -302,10 +312,10 @@ export async function prepareExecutor(
     return {
       url: mcpUrl,
       headers: { Authorization: `Bearer ${token}` },
-      cleanup: () => stop(child),
+      cleanup: () => cleanup(child, dataDirectory),
     };
   } catch (error) {
-    await stop(child);
+    await cleanup(child, dataDirectory);
     throw error;
   }
 }

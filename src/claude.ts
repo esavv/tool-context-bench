@@ -362,7 +362,10 @@ export class ClaudeCollector {
             this.warn("Claude Executor use was observed outside an Executor trial.");
           }
         }
-        if (/code.?mode|execute.?code|executor/i.test(name)) {
+        if (
+          /code.?mode|execute.?code|executor/i.test(name) &&
+          this.trial.technique !== "executor"
+        ) {
           this.events.codeMode = true;
           this.events.error = true;
           this.warn("Claude code mode was observed.");
@@ -685,7 +688,9 @@ export async function prepareClaude(
       "No login copies, new Keychain, API keys, or bare mode. Existing global app state and subscription auth can refresh or change during a run.",
       trial.technique === "tool-search"
         ? "Strict explicit MCP config; native ToolSearch enabled with MCP_DISCOVERY_CACHE=0. Init and runtime evidence are checked by the collector."
-        : "Strict explicit MCP config; eager tools with ENABLE_TOOL_SEARCH=false and MCP_DISCOVERY_CACHE=0. Init must include all expected tools and no ToolSearch; runtime evidence is checked by the collector.",
+        : trial.technique === "executor"
+          ? "Strict explicit MCP config; only Executor execute, resume, and skills are exposed. Native Claude Code workflows and tool search remain disabled."
+          : "Strict explicit MCP config; eager tools with ENABLE_TOOL_SEARCH=false and MCP_DISCOVERY_CACHE=0. Init must include all expected tools and no ToolSearch; runtime evidence is checked by the collector.",
       "Terminal title, background tasks, nonessential traffic, updates, and compaction are disabled; permission prompts, slash commands, suggestions, and Chrome are disabled.",
       "Native stream-json stdout is captured as redacted JSONL by the runner. The unredacted native session is retained in shared Claude history for inspection.",
     ],

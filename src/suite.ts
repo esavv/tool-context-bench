@@ -366,7 +366,7 @@ export function suitePrompt(config: Config, trial: Trial): string {
     trial.technique === "bash"
       ? "Use only the installed gh, supabase, wrangler, and stripe CLIs for remote service reads."
       : trial.technique === "executor"
-        ? "Use only the configured Executor MCP tools. Use Executor's TypeScript execution mechanism to discover and call the approved upstream MCP tools."
+        ? "Use only the configured Executor MCP tools. Use Executor's TypeScript execution mechanism to discover and call the approved upstream MCP tools. Relevant read tools are github list_commits/get_commit, supabase list_edge_functions, cloudflare d1_database_get/d1_databases_list, and Stripe stripe_api_search/stripe_api_details/stripe_api_read. Executor paths use <service>.org.benchmark.<tool>; call known paths directly and combine discovery or reads in one execution when practical."
         : trial.technique === "tool-search"
           ? "Use only native tool discovery and the configured MCP services. OpenCode 2 uses its integrated search and code-mode execute mechanism."
           : "Use only the configured GitHub, Supabase, Cloudflare, and Stripe MCP tools.";
