@@ -217,6 +217,7 @@ export async function prepareExecutor(
       });
     }
 
+    const catalogMetadata = z.object({ upstreamCatalogHash: z.string() }).parse(catalog.server);
     const sourceTools = z.array(sourceToolSchema).parse(catalog.tools);
     const allTools = z.array(executorToolSchema).parse(await request(origin, token, "/tools"));
     const sourceByName = new Map(sourceTools.map((tool) => [`${tool._server}:${tool.name}`, tool]));
@@ -291,7 +292,8 @@ export async function prepareExecutor(
         {
           version: executorVersion,
           hosting: "local isolated foreground daemon",
-          upstreamCatalogHash: catalog.hash,
+          executorCatalogHash: catalog.hash,
+          upstreamCatalogHash: catalogMetadata.upstreamCatalogHash,
           integrations: Object.entries(servers).map(([name, server]) => ({
             name,
             url: server.url,

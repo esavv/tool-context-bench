@@ -815,7 +815,7 @@ export default {
       trial.technique === "tool-search"
         ? "Integrated MCP search plus Code Mode: MCP codemode=true and execute is the only exposed service mechanism."
         : trial.technique === "executor"
-          ? "Executor MCP exposes executor_execute and executor_skills; native execute is denied and Executor performs the required code execution."
+          ? "Executor MCP exposes executor_execute, executor_resume, and executor_skills; native execute is denied and Executor performs the required code execution."
           : "Direct shell or MCP definitions only; MCP codemode=false; execute denied before tool snapshot; no Code Mode catalog.",
       "steps=8 (eighth logical step is text-only; retries can add requests); explicit title prevents title generation.",
       "No OS sandbox: shell permissions are not a filesystem security boundary.",
