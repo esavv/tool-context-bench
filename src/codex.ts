@@ -245,6 +245,7 @@ export async function prepareCodex(
           `url = ${JSON.stringify(server.url)}`,
           "enabled = true",
           "required = true",
+          ...(trial.technique === "executor" ? ['default_tools_approval_mode = "approve"'] : []),
           `bearer_token_env_var = ${JSON.stringify(tokenName)}`,
           `omit_tools_from = ${JSON.stringify(trial.technique === "tool-search" ? ["direct", "code_mode"] : ["deferred", "code_mode"])}`,
           ...(headers.length
@@ -333,8 +334,10 @@ export async function prepareCodex(
     if (!code && !/^(?:tool_search|web_search)(?:_call)?$/.test(name)) return false;
     events.codeMode ||= code;
     if (trial.technique !== "tool-search" && trial.technique !== "executor") events.error = true;
-    const warning = "Codex search or Code Mode use was observed despite direct-tool settings.";
-    if (!events.warnings.includes(warning)) events.warnings.push(warning);
+    if (trial.technique !== "executor") {
+      const warning = "Codex search or Code Mode use was observed despite direct-tool settings.";
+      if (!events.warnings.includes(warning)) events.warnings.push(warning);
+    }
     return true;
   };
   return {
