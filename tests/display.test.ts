@@ -216,6 +216,17 @@ describe("batch selection", () => {
     expect(selectionProblem([second])).toBeNull();
   });
 
+  it("combines batches with different step limits and exposes each limit in batch fields", () => {
+    const first = batch([result("first")]);
+    const second = structuredClone(first);
+    second.manifest.id = "second";
+    second.manifest.config.maxSteps = 16;
+    expect(selectionProblem([first, second])).toBeNull();
+    expect(() => combineBatches([first, second], first)).not.toThrow();
+    expect(batchFields(first).stepLimit).toBe(8);
+    expect(batchFields(second).stepLimit).toBe(16);
+  });
+
   it("keeps GitHub and multi-tool batches separate", () => {
     const github = batch([result("github")]);
     const suite = structuredClone(github);
@@ -237,6 +248,7 @@ describe("batch selection", () => {
       workload: "both",
       agents: "opencode",
       repeats: 3,
+      stepLimit: 8,
       sessions: "2/2",
       id: input.manifest.id,
     });

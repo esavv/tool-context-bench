@@ -27,7 +27,6 @@ export function selectionProblem(batches: readonly Batch[]): string | null {
     repository: batch.manifest.config.repository,
     branch: batch.manifest.config.branch,
     fixture: JSON.stringify(batch.manifest.expected),
-    "step limit": batch.manifest.config.maxSteps,
     "timeout limit": batch.manifest.config.timeoutSeconds,
     "exposure evidence": batch.manifest.exposure,
   });
@@ -173,6 +172,7 @@ export function batchFields(batch: Batch) {
     workload,
     agents: agents || "no agents",
     repeats,
+    stepLimit: batch.manifest.config.maxSteps,
     sessions: `${finished}/${batch.manifest.schedule.length}`,
     id: batch.manifest.id,
   };

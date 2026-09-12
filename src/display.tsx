@@ -605,6 +605,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     { key: "workload", heading: "Workload" },
     { key: "agents", heading: "Agents" },
     { key: "repeats", heading: "Repeats", numeric: true },
+    { key: "stepLimit", heading: "Step limit", numeric: true },
     { key: "sessions", heading: "Sessions", numeric: true },
     { key: "id", heading: "Batch ID" },
   ];
