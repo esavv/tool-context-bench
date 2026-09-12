@@ -116,8 +116,8 @@ function parseCsv(csv: string): Record<string, string>[] {
 }
 
 describe("statistics", () => {
-  it("uses the explicit Executor code-execution label", () => {
-    expect(techniqueLabel("executor")).toBe("Executor (code execution)");
+  it("uses the lowercase Executor technique label", () => {
+    expect(techniqueLabel("executor")).toBe("executor");
   });
   it("keeps unavailable values distinct from measured zero", () => {
     expect(statistics([null, NaN, Infinity, -1])).toEqual({

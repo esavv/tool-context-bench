@@ -30,7 +30,7 @@ const techniques: Trial["technique"][] = [
 ];
 
 export function techniqueLabel(technique: Trial["technique"]): string {
-  return technique === "executor" ? "Executor (code execution)" : technique;
+  return technique;
 }
 
 export interface Statistics {
@@ -978,7 +978,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                   </Text>
                 ))
               : "Select one or more batches below."}
-            {` · ${selectedBatches.length} selected batch${selectedBatches.length === 1 ? "" : "es"}`}
           </Text>
         </Panel>
       )}
