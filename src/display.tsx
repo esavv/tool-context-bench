@@ -6,7 +6,6 @@ import { batchAgentProfiles, batchFields, combineBatches, selectionProblem } fro
 import { agentLabel, agentSchema } from "./agents.js";
 
 type Metric = Exclude<keyof Metrics, "complete">;
-type ChartMetric = "initialInput" | "totalTokens";
 const metrics: { key: Metric; label: string }[] = [
   { key: "initialInput", label: "Initial input + cache" },
   { key: "totalInput", label: "Session input (all requests)" },
@@ -570,7 +569,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     initialBatch.manifest.schedule[0]?.workload ?? "task",
   );
   const [selected, setSelected] = useState(0);
-  const [metric, setMetric] = useState<ChartMetric>("initialInput");
   const [detail, setDetail] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [scroll, setScroll] = useState(0);
@@ -664,8 +662,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
           ["q", "quit"],
         ]
       : [
-          ["i", "Initial input + cache"],
-          ["t", "Total session tokens"],
           ["↑↓", "select"],
           ["enter", "detail"],
           ["q", "quit"],
@@ -741,20 +737,36 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     visibleGroups.push(group);
     chartHeight += group.length + 3;
   }
-  const label = metrics.find((item) => item.key === metric)?.label ?? metric;
-  const max = Math.max(0, ...rows.map((item) => item.metrics[metric].median ?? 0));
+  const initialMax = Math.max(0, ...rows.map((item) => item.metrics.initialInput.median ?? 0));
+  const totalMax = Math.max(0, ...rows.map((item) => item.metrics.totalTokens.median ?? 0));
+  const visibleRange =
+    visibleGroups.flat().length < rows.length
+      ? ` · groups ${groupTop + 1}–${groupTop + visibleGroups.length}/${groups.length}`
+      : "";
   const barCounts = (item: SummaryRow) =>
     `${item.success}/${item.tried} success${item.pending > 0 ? ` · ${item.pending} pending` : ""}`;
-  const chartValue = (item: SummaryRow) => {
+  const chartValue = (item: SummaryRow, metric: "initialInput" | "totalTokens") => {
     const stat = item.metrics[metric];
     return stat.n === 0 && item.tried === 0 && item.pending > 0
       ? "pending"
       : formatted(stat.median);
   };
-  const valueWidth = Math.max(7, ...rows.map((item) => chartValue(item).length));
+  const initialValueWidth = Math.max(
+    7,
+    ...rows.map((item) => chartValue(item, "initialInput").length),
+  );
+  const totalValueWidth = Math.max(
+    7,
+    ...rows.map((item) => chartValue(item, "totalTokens").length),
+  );
   const countWidth = Math.max(0, ...rows.map((item) => barCounts(item).length));
   const agentWidth = Math.max(...agentSchema.options.map((agent) => agentLabel(agent).length));
-  const barWidth = Math.max(1, width - 4 - (agentWidth + 2) - valueWidth - countWidth - 3);
+  const barWidth = Math.max(
+    1,
+    Math.floor(
+      (width - 4 - (agentWidth + 2) - initialValueWidth - totalValueWidth - countWidth - 6) / 2,
+    ),
+  );
   const lines = (result ? details(result) : ["No attempts."]).flatMap((line) => {
     const characters = Array.from(line);
     return Array.from(
@@ -806,8 +818,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       setScroll(0);
       setDetail(false);
     }
-    if (!detail && input === "i") setMetric("initialInput");
-    if (!detail && input === "t") setMetric("totalTokens");
     if (key.return || key.escape) {
       setDetail(key.escape ? false : !detail);
       setScroll(0);
@@ -878,15 +888,22 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
         </Panel>
       ) : (
         <Panel
-          title={`${viewBenchmark === "suite" ? "multi-tool" : "github"} ${workload} · ${label}`}
+          title={`${viewBenchmark === "suite" ? "multi-tool" : "github"} ${workload}${visibleRange}`}
           width={width}
         >
-          <Text {...inkColor(palette.muted)} wrap="truncate-end">
-            median · shared scale 0–{formatted(max)}
-            {visibleGroups.flat().length < rows.length
-              ? ` · groups ${groupTop + 1}–${groupTop + visibleGroups.length}/${groups.length}`
-              : ""}
-          </Text>
+          <Box marginLeft={agentWidth + 3}>
+            <Box width={barWidth + initialValueWidth + 1} justifyContent="center">
+              <Text bold {...inkColor(palette.white)} wrap="truncate-end">
+                Initial input + cache · median 0–{formatted(initialMax)}
+              </Text>
+            </Box>
+            <Box width={2} />
+            <Box width={barWidth + totalValueWidth + 1} justifyContent="center">
+              <Text bold {...inkColor(palette.white)} wrap="truncate-end">
+                Total session tokens · median 0–{formatted(totalMax)}
+              </Text>
+            </Box>
+          </Box>
           <Text> </Text>
           {visibleGroups.map((group) => (
             <Box key={group[0]?.technique} flexDirection="column">
@@ -895,15 +912,31 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
               </Text>
               <Text> </Text>
               {group.map((item) => {
-                const stat = item.metrics[metric];
+                const initial = item.metrics.initialInput;
+                const total = item.metrics.totalTokens;
                 return (
                   <Text key={item.agent} wrap="truncate-end">
                     <Text bold={item === row} {...inkColor(palette[item.agent])}>
                       {item === row ? "▸" : " "} {agentLabel(item.agent).padEnd(agentWidth)}
                     </Text>{" "}
-                    <Meter agent={item.agent} value={stat.median} max={max} width={barWidth} />{" "}
-                    <Text {...inkColor(stat.n ? palette.white : palette.amber)}>
-                      {chartValue(item).padStart(valueWidth)}
+                    <Meter
+                      agent={item.agent}
+                      value={initial.median}
+                      max={initialMax}
+                      width={barWidth}
+                    />{" "}
+                    <Text {...inkColor(initial.n ? palette.white : palette.amber)}>
+                      {chartValue(item, "initialInput").padStart(initialValueWidth)}
+                    </Text>
+                    {"  "}
+                    <Meter
+                      agent={item.agent}
+                      value={total.median}
+                      max={totalMax}
+                      width={barWidth}
+                    />{" "}
+                    <Text {...inkColor(total.n ? palette.white : palette.amber)}>
+                      {chartValue(item, "totalTokens").padStart(totalValueWidth)}
                     </Text>{" "}
                     <Text
                       {...inkColor(item.validSamples < item.tried ? palette.amber : palette.muted)}
