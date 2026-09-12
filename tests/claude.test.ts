@@ -211,6 +211,7 @@ it("counts stream snapshots once, keeps completed usage, and joins tool results 
       cache_creation_input_tokens: 5,
       output_tokens: 16,
     },
+    permission_denials: [{ tool_name: "Bash" }],
     headers: { authorization: token },
   });
   const usage = collector.collect();
@@ -227,6 +228,7 @@ it("counts stream snapshots once, keeps completed usage, and joins tool results 
     complete: true,
   });
   expect(usage.requests).toHaveLength(2);
+  expect(usage.warnings).toContain("Claude reported denied tool permissions.");
   expect(usage.models).toEqual(["claude-sonnet-5"]);
   expect(collector.events.answer).toBe("final answer");
   expect(collector.events.tools).toEqual([

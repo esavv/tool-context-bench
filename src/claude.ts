@@ -389,7 +389,7 @@ export class ClaudeCollector {
           : this.fallbackAnswer;
       if (typeof event.result !== "string") this.warn("Claude final answer was missing.");
       if (Array.isArray(event.permission_denials) && event.permission_denials.length > 0) {
-        this.warn("Claude reported denied tool permissions.");
+        this.warnings.add("Claude reported denied tool permissions.");
       }
     }
   }
