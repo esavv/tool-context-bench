@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { csvReport, statistics, summarize, textReport } from "../src/display.js";
+import { csvReport, sessionInspection, statistics, summarize, textReport } from "../src/display.js";
 import type { Batch, Metrics, Result, Trial } from "../src/types.js";
 import { batchFields, combineBatches, selectionProblem } from "../src/batches.js";
 
@@ -15,6 +15,7 @@ function result(id: string, overrides: Partial<Result> = {}): Result {
     answer: "OK",
     tools: [],
     codeMode: "not-observed",
+    grading: { routeValid: true, schemaValid: true, valueMatches: true },
     metrics: usage(),
     ...overrides,
   };
@@ -39,7 +40,7 @@ function usage(overrides: Partial<Metrics> = {}): Metrics {
 function batch(results: Result[]): Batch {
   return {
     manifest: {
-      schemaVersion: 3,
+      schemaVersion: 4,
       id: "batch-1",
       createdAt: "2026-09-09T00:00:00Z",
       benchmark: "github",
@@ -430,6 +431,7 @@ describe("summarize", () => {
     "cancelled",
     "fixture-drift",
     "invalid-route",
+    "invalid-schema",
     "usage-incomplete",
   ];
   it.each(failureStatuses)("keeps %s visible", (status) => {
@@ -472,12 +474,50 @@ describe("textReport", () => {
     expect(text).toContain("Database: /runs/a/opencode.db");
     expect(text).toContain("Work directory: /runs/a/work");
     expect(text).toContain("Route: bash | Code Mode: used");
+    expect(text).toContain("Route verified: yes");
+    expect(text).toContain("Schema compliant: yes");
+    expect(text).toContain("Values accurate: yes");
+    expect(text).toContain("Inspect in agent:");
+    expect(text).toContain("opencode '/runs/a/work' --pure --session 'session-a' --agent bench");
     expect(text).toContain("route needs review");
     expect(text).toContain("Source limitation: OpenCode normalizes");
     expect(text).not.toContain("1.18.29");
     expect(text).toContain("gh api repos/owner/repo");
     expect(text).not.toMatch(/\$|%/);
     expect(text).not.toContain("\u001b");
+  });
+
+  it("builds OpenCode 2 inspection commands and explains unavailable sessions", () => {
+    const opencode2 = result("v2", {
+      trial: {
+        id: "v2",
+        agent: "opencode2",
+        workload: "task",
+        technique: "mcp-tuned",
+        repetition: 1,
+      },
+      sessionID: "ses_test",
+      session: {
+        configPath: "/bench/attempts/run_trial/opencode2-abc/bench.json",
+        databasePath: "/bench/attempts/run_trial/opencode2-abc/usage.jsonl",
+        workDirectory: "/bench/attempts/run_trial/opencode2-abc/work",
+        settings: [],
+        dataKind: "jsonl",
+      },
+    });
+    expect(sessionInspection(opencode2).command).toContain(
+      "OPENCODE_DB='/bench/opencode2/opencode.db'",
+    );
+    expect(sessionInspection(opencode2).command).toContain(
+      "opencode2 --standalone --session 'ses_test'",
+    );
+    expect(
+      sessionInspection(
+        result("claude", {
+          trial: { ...opencode2.trial, agent: "claude" },
+        }),
+      ).unavailable,
+    ).toContain("persistence was disabled");
   });
   it("shows ranges and unknown failed samples, and neutralizes terminal controls", () => {
     const text = textReport(
@@ -524,6 +564,9 @@ describe("csvReport", () => {
     });
     expect(records[1]).toMatchObject({
       telemetry_complete: "false",
+      route_valid: "true",
+      schema_valid: "true",
+      value_matches: "true",
       totalTokens: "330",
       valid_samples: "0",
     });

@@ -50,6 +50,24 @@ export const metricSchema = z.object({
 });
 export type Metrics = z.infer<typeof metricSchema>;
 
+export const gradingSchema = z.discriminatedUnion("schemaValid", [
+  z
+    .object({
+      routeValid: z.boolean(),
+      schemaValid: z.literal(false),
+      valueMatches: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      routeValid: z.boolean(),
+      schemaValid: z.literal(true),
+      valueMatches: z.boolean(),
+    })
+    .strict(),
+]);
+export type Grading = z.infer<typeof gradingSchema>;
+
 export const resultSchema = z.object({
   trial: trialSchema,
   status: z.enum([
@@ -60,6 +78,7 @@ export const resultSchema = z.object({
     "cancelled",
     "fixture-drift",
     "invalid-route",
+    "invalid-schema",
     "usage-incomplete",
   ]),
   success: z.boolean(),
@@ -73,6 +92,7 @@ export const resultSchema = z.object({
     z.object({ name: z.string(), status: z.string(), command: z.string().optional() }),
   ),
   codeMode: z.enum(["used", "not-observed", "unknown"]),
+  grading: gradingSchema.nullable().default(null),
   origin: z.object({ batchID: z.string(), trialID: z.string() }).optional(),
   session: z
     .object({
@@ -87,7 +107,7 @@ export const resultSchema = z.object({
 export type Result = z.infer<typeof resultSchema>;
 
 export const manifestSchema = z.object({
-  schemaVersion: z.literal(3),
+  schemaVersion: z.literal(4),
   id: z.string(),
   createdAt: z.string(),
   benchmark: benchmarkSchema.default("github"),

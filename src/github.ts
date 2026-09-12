@@ -121,7 +121,19 @@ export async function readCatalog(technique: Technique, token: string): Promise<
   }
 }
 
-export function answerMatches(text: string, expected: Expected): boolean {
+const answerSchema = z
+  .object({
+    sha: z.string(),
+    subject: z.string(),
+    committed_at: z.string(),
+    source_url: z.string(),
+  })
+  .strict();
+
+export function gradeAnswer(
+  text: string,
+  expected: Expected,
+): { schemaValid: false; valueMatches: null } | { schemaValid: true; valueMatches: boolean } {
   try {
     const cleaned = text
       .trim()
@@ -132,14 +144,20 @@ export function answerMatches(text: string, expected: Expected): boolean {
     const value: unknown = JSON.parse(
       start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned,
     );
-    const answer = expectedSchema.parse(value);
-    return (
-      answer.sha === expected.sha &&
-      answer.subject === expected.subject &&
-      Date.parse(answer.committed_at) === Date.parse(expected.committed_at) &&
-      answer.source_url === expected.source_url
-    );
+    const answer = answerSchema.parse(value);
+    return {
+      schemaValid: true,
+      valueMatches:
+        answer.sha === expected.sha &&
+        answer.subject === expected.subject &&
+        Date.parse(answer.committed_at) === Date.parse(expected.committed_at) &&
+        answer.source_url === expected.source_url,
+    };
   } catch {
-    return false;
+    return { schemaValid: false, valueMatches: null };
   }
+}
+
+export function answerMatches(text: string, expected: Expected): boolean {
+  return gradeAnswer(text, expected).valueMatches === true;
 }

@@ -14,11 +14,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { configSchema } from "../src/config.js";
 import { inspectSubscription, redact } from "../src/credentials.js";
 import { approvedCommand, approvedSuiteCommand, EventCollector } from "../src/events.js";
-import { answerMatches, githubHeaders, MCP_URL } from "../src/github.js";
+import { answerMatches, gradeAnswer, githubHeaders, MCP_URL } from "../src/github.js";
 import { agentConfig, attemptEnvironment, prepareAttempt } from "../src/opencode.js";
 import { execute } from "../src/process.js";
 import { prompt, schedule } from "../src/schedule.js";
 import { saveJson } from "../src/storage.js";
+import { shouldStopBatch } from "../src/runner.js";
 import type { Expected, Technique, Trial } from "../src/types.js";
 
 const config = configSchema.parse({
@@ -695,6 +696,23 @@ describe("answerMatches and redact", () => {
   it.each(Object.keys(expected))("requires field %s", (missing) => {
     const answer = Object.fromEntries(Object.entries(expected).filter(([key]) => key !== missing));
     expect(answerMatches(JSON.stringify(answer), expected)).toBe(false);
+  });
+
+  it("separates answer schema compliance from value accuracy", () => {
+    expect(gradeAnswer(JSON.stringify({ ...expected, sha: "wrong" }), expected)).toEqual({
+      schemaValid: true,
+      valueMatches: false,
+    });
+    expect(gradeAnswer(JSON.stringify({ tip_sha: expected.sha }), expected)).toEqual({
+      schemaValid: false,
+      valueMatches: null,
+    });
+  });
+
+  it("stops on route and schema errors but not value mismatches", () => {
+    expect(shouldStopBatch("invalid-route")).toBe(true);
+    expect(shouldStopBatch("invalid-schema")).toBe(true);
+    expect(shouldStopBatch("complete")).toBe(false);
   });
 
   it.each([

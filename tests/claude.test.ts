@@ -259,7 +259,9 @@ it("accepts Claude tool search with the complete callable MCP inventory", () => 
   expect(usage.warnings).toContain(
     "Claude init confirmed native ToolSearch and the expected MCP callable inventory.",
   );
-  expect(usage.warnings).not.toContain("Claude init tools did not match the expected route catalog.");
+  expect(usage.warnings).not.toContain(
+    "Claude init tools did not match the expected route catalog.",
+  );
 });
 
 it("marks unexpected discovery and missing requests incomplete, reconciles totals, and fails pending MCP calls", () => {

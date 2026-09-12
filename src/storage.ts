@@ -107,7 +107,7 @@ export async function loadBatch(paths: Paths, id: string): Promise<Batch> {
     const config = { ...z.record(z.string(), z.unknown()).parse(manifestData.config) };
     delete config.githubToolsets;
     manifestData.config = config;
-    manifestData.schemaVersion = 3;
+    manifestData.schemaVersion = 4;
     manifestData.schedule = z
       .array(z.unknown())
       .parse(manifestData.schedule)
@@ -125,6 +125,7 @@ export async function loadBatch(paths: Paths, id: string): Promise<Batch> {
       );
     }
   }
+  if (legacyVersion === 3) manifestData.schemaVersion = 4;
   const manifest = manifestSchema.parse(manifestData);
   const results = [];
   for (const entry of await readdir(directory)) {

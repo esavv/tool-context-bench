@@ -20,7 +20,7 @@ import { opencode2Auth, prepareOpencode2 } from "./opencode2.js";
 import { claudeAuth, prepareClaude } from "./claude.js";
 import { codexAuth, prepareCodex } from "./codex.js";
 import type { AgentUsage, PreparedAgent } from "./adapter.js";
-import { readCatalog, readExpected, answerMatches, type Catalog } from "./github.js";
+import { readCatalog, readExpected, gradeAnswer, type Catalog } from "./github.js";
 import { techniqueSchema, techniqueSettings } from "./techniques.js";
 import { sessionDetails } from "./session.js";
 import { schedule, prompt } from "./schedule.js";
@@ -31,7 +31,7 @@ import { piAuth, preparePi } from "./pi.js";
 import {
   readSuiteCatalog,
   readSuiteExpected,
-  suiteAnswerMatches,
+  gradeSuiteAnswer,
   suiteCliVersions,
   suiteCredentials,
   type SuiteCredentials,
@@ -300,6 +300,17 @@ export interface RunOptions {
   progress: (message: string) => void;
 }
 
+export function shouldStopBatch(status: Result["status"]): boolean {
+  return [
+    "invalid-route",
+    "invalid-schema",
+    "fixture-drift",
+    "cancelled",
+    "timeout",
+    "failed",
+  ].includes(status);
+}
+
 export async function run(config: Config, paths: Paths, options: RunOptions): Promise<Batch> {
   await ensureRoot(paths);
   const release = await acquireLock(paths);
@@ -345,7 +356,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
     ).filter((trial) => options.workloads.includes(trial.workload));
     const batch: Batch = {
       manifest: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         id,
         createdAt: new Date().toISOString(),
         benchmark: options.benchmark,
@@ -418,6 +429,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
         answer: "",
         tools: [],
         codeMode: "unknown",
+        grading: null,
         session: {
           configPath: prepared.configPath,
           databasePath: prepared.dataPath,
@@ -524,28 +536,38 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
             ? "unknown"
             : "not-observed";
         result.warnings = [...new Set([...result.warnings, ...events.warnings])];
-        const answerOK =
+        const answerGrade =
           trial.workload === "task"
             ? options.benchmark === "suite"
-              ? suiteAnswerMatches(events.answer, suiteExpectedSchema.parse(expected))
-              : answerMatches(events.answer, expectedSchema.parse(expected))
-            : events.answer.trim() === "OK";
-        result.success = processResult.code === 0 && !events.error && events.routeValid && answerOK;
+              ? gradeSuiteAnswer(events.answer, suiteExpectedSchema.parse(expected))
+              : gradeAnswer(events.answer, expectedSchema.parse(expected))
+            : { schemaValid: true as const, valueMatches: events.answer.trim() === "OK" };
+        result.grading = { routeValid: events.routeValid, ...answerGrade };
+        result.success =
+          processResult.code === 0 &&
+          !events.error &&
+          result.grading.routeValid &&
+          result.grading.schemaValid &&
+          result.grading.valueMatches;
         result.status = options.signal.aborted
           ? "cancelled"
           : processResult.stopped
             ? "timeout"
-            : events.invalidRoute
-              ? "invalid-route"
-              : !result.success
-                ? "failed"
-                : !result.metrics?.complete
-                  ? "usage-incomplete"
-                  : "complete";
+            : processResult.code !== 0 || events.error
+              ? "failed"
+              : !result.grading.routeValid
+                ? "invalid-route"
+                : !result.grading.schemaValid
+                  ? "invalid-schema"
+                  : !result.metrics?.complete
+                    ? "usage-incomplete"
+                    : "complete";
         if (result.status === "timeout" || result.status === "cancelled") result.success = false;
-        if (!answerOK)
+        if (!result.grading.schemaValid)
+          result.warnings.push("Final answer did not comply with the required answer schema.");
+        else if (!result.grading.valueMatches)
           result.warnings.push(
-            "Final answer did not match the expected JSON fields or exact OK response.",
+            "Final answer complied with the schema but did not match the expected values.",
           );
         if (!events.routeValid)
           result.warnings.push("Required read-only tool route was not verified.");
@@ -575,9 +597,7 @@ export async function run(config: Config, paths: Paths, options: RunOptions): Pr
       options.progress(
         `  ${result.status}: initial=${result.metrics?.initialInput ?? "unknown"}; total=${result.metrics?.totalTokens ?? "unknown"}; ${result.success ? "1 success / 1 tried" : "0 success / 1 tried"}`,
       );
-      if (
-        ["invalid-route", "fixture-drift", "cancelled", "timeout", "failed"].includes(result.status)
-      ) {
+      if (shouldStopBatch(result.status)) {
         options.progress("Batch stopped for inspection; unstarted sessions remain pending.");
         break;
       }

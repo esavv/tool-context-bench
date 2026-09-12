@@ -110,10 +110,11 @@ async function writeBatch(id: string): Promise<Batch> {
     answer: "OK",
     tools: [],
     codeMode: "not-observed",
+    grading: { routeValid: true, schemaValid: true, valueMatches: true },
   }));
   const batch: Batch = {
     manifest: {
-      schemaVersion: 3,
+      schemaVersion: 4,
       id,
       createdAt: "2026-09-09T00:00:00Z",
       benchmark: "github",
@@ -340,6 +341,21 @@ describe("runtime locking", () => {
 });
 
 describe("view batch loading", () => {
+  it("loads version 3 results with unknown grading without rewriting them", async () => {
+    const batch = await writeBatch("version-3-batch");
+    const directory = join(paths.results, "version-3-batch");
+    const manifest = { ...batch.manifest, schemaVersion: 3 };
+    const result = { ...batch.results[0] };
+    delete result.grading;
+    await writeFile(join(directory, "manifest.json"), JSON.stringify(manifest));
+    await writeFile(join(directory, "0.result.json"), JSON.stringify(result));
+    await rm(join(directory, "1.result.json"));
+    const loaded = await loadBatch(paths, "version-3-batch");
+    expect(loaded.manifest.schemaVersion).toBe(4);
+    expect(loaded.results[0]?.grading).toBeNull();
+    expect(await readFile(join(directory, "manifest.json"), "utf8")).toBe(JSON.stringify(manifest));
+  });
+
   it("keeps the actual filtered/read-only meaning of version 1 MCP results without rewriting them", async () => {
     const batch = await writeBatch("legacy-batch");
     const directory = join(paths.results, "legacy-batch");

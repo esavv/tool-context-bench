@@ -300,7 +300,35 @@ export function parseSuiteExpected(
   }
 }
 
-export function suiteAnswerMatches(text: string, expected: SuiteExpected): boolean {
+const suiteAnswerSchema = z
+  .object({
+    github: z
+      .object({
+        sha: z.string(),
+        subject: z.string(),
+        committed_at: z.string(),
+        source_url: z.string(),
+      })
+      .strict(),
+    supabase: z.object({ id: z.string(), slug: z.string(), status: z.string() }).strict(),
+    cloudflare: z
+      .object({
+        uuid: z.string(),
+        name: z.string(),
+        created_at: z.string(),
+        version: z.string(),
+      })
+      .strict(),
+    stripe: z
+      .object({ webhook_endpoint_id: z.string(), description: z.string().nullable() })
+      .strict(),
+  })
+  .strict();
+
+export function gradeSuiteAnswer(
+  text: string,
+  expected: SuiteExpected,
+): { schemaValid: false; valueMatches: null } | { schemaValid: true; valueMatches: boolean } {
   try {
     const cleaned = text
       .trim()
@@ -308,27 +336,33 @@ export function suiteAnswerMatches(text: string, expected: SuiteExpected): boole
       .replace(/\n?```$/, "");
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
-    const answer = suiteExpectedSchema.parse(
+    const answer = suiteAnswerSchema.parse(
       JSON.parse(start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned),
     );
-    return (
-      answer.github.sha === expected.github.sha &&
-      answer.github.subject === expected.github.subject &&
-      Date.parse(answer.github.committed_at) === Date.parse(expected.github.committed_at) &&
-      answer.github.source_url === expected.github.source_url &&
-      answer.supabase.id === expected.supabase.id &&
-      answer.supabase.slug === expected.supabase.slug &&
-      answer.supabase.status === expected.supabase.status &&
-      answer.cloudflare.uuid === expected.cloudflare.uuid &&
-      answer.cloudflare.name === expected.cloudflare.name &&
-      Date.parse(answer.cloudflare.created_at) === Date.parse(expected.cloudflare.created_at) &&
-      answer.cloudflare.version === expected.cloudflare.version &&
-      answer.stripe.webhook_endpoint_id === expected.stripe.webhook_endpoint_id &&
-      answer.stripe.description === expected.stripe.description
-    );
+    return {
+      schemaValid: true,
+      valueMatches:
+        answer.github.sha === expected.github.sha &&
+        answer.github.subject === expected.github.subject &&
+        Date.parse(answer.github.committed_at) === Date.parse(expected.github.committed_at) &&
+        answer.github.source_url === expected.github.source_url &&
+        answer.supabase.id === expected.supabase.id &&
+        answer.supabase.slug === expected.supabase.slug &&
+        answer.supabase.status === expected.supabase.status &&
+        answer.cloudflare.uuid === expected.cloudflare.uuid &&
+        answer.cloudflare.name === expected.cloudflare.name &&
+        Date.parse(answer.cloudflare.created_at) === Date.parse(expected.cloudflare.created_at) &&
+        answer.cloudflare.version === expected.cloudflare.version &&
+        answer.stripe.webhook_endpoint_id === expected.stripe.webhook_endpoint_id &&
+        answer.stripe.description === expected.stripe.description,
+    };
   } catch {
-    return false;
+    return { schemaValid: false, valueMatches: null };
   }
+}
+
+export function suiteAnswerMatches(text: string, expected: SuiteExpected): boolean {
+  return gradeSuiteAnswer(text, expected).valueMatches === true;
 }
 
 export function suitePrompt(config: Config, trial: Trial): string {

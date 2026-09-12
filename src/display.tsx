@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Box, Text, render, useApp, useInput, useStdout } from "ink";
+import { dirname, join } from "node:path";
 import type { Batch, BatchHistory, Benchmark, Metrics, Result, Trial } from "./types.js";
 import { batchAgentProfiles, batchFields, combineBatches, selectionProblem } from "./batches.js";
 import { agentLabel, agentSchema } from "./agents.js";
@@ -172,13 +173,80 @@ function warningText(warning: string): string {
   );
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+export function sessionInspection(result: Result): { command?: string; unavailable?: string } {
+  const session = result.session;
+  const sessionID = result.sessionID;
+  if (result.trial.agent === "claude") {
+    return { unavailable: "Claude session persistence was disabled; inspect the saved JSONL." };
+  }
+  if (result.trial.agent === "pi") {
+    return { unavailable: "Pi session persistence was disabled; inspect the saved JSONL." };
+  }
+  if (!session || !sessionID) {
+    return { unavailable: "No native persisted session is available." };
+  }
+  const env = (values: Record<string, string>) =>
+    Object.entries(values)
+      .map(([name, value]) => `${name}=${shellQuote(value)}`)
+      .join(" ");
+  if (result.trial.agent === "opencode2") {
+    const runtime = dirname(session.configPath);
+    const root = dirname(dirname(dirname(runtime)));
+    return {
+      command: `${env({
+        OPENCODE_DB: join(root, "opencode2", "opencode.db"),
+        OPENCODE_CONFIG: session.configPath,
+        OPENCODE_CONFIG_DIR: join(runtime, "config"),
+        OPENCODE_CONFIG_PROJECT_DISABLE: "true",
+      })} opencode2 --standalone --session ${shellQuote(sessionID)} ${shellQuote(session.workDirectory)}`,
+    };
+  }
+  if (result.trial.agent === "opencode") {
+    const runtime = dirname(session.configPath);
+    return {
+      command: `${env({
+        HOME: join(runtime, "home"),
+        XDG_CONFIG_HOME: join(runtime, "config"),
+        XDG_DATA_HOME: join(runtime, "data"),
+        XDG_CACHE_HOME: join(runtime, "cache"),
+        XDG_STATE_HOME: join(runtime, "state"),
+        OPENCODE_CONFIG: session.configPath,
+        OPENCODE_DB: session.databasePath,
+        OPENCODE_PURE: "true",
+      })} opencode ${shellQuote(session.workDirectory)} --pure --session ${shellQuote(sessionID)} --agent bench`,
+    };
+  }
+  const codexHome = dirname(session.configPath);
+  const home = dirname(codexHome);
+  const runtime = dirname(home);
+  return {
+    command: `${env({
+      HOME: home,
+      CODEX_HOME: codexHome,
+      XDG_CONFIG_HOME: join(runtime, "config"),
+      XDG_DATA_HOME: join(runtime, "data"),
+      XDG_CACHE_HOME: join(runtime, "cache"),
+      XDG_STATE_HOME: join(runtime, "state"),
+    })} codex resume --strict-config --include-non-interactive -C ${shellQuote(session.workDirectory)} ${shellQuote(sessionID)}`,
+  };
+}
+
 function details(result: Result): string[] {
+  const inspection = sessionInspection(result);
+  const grading = result.grading;
   return [
     `${safeText(result.origin?.trialID ?? result.trial.id)} | ${result.status} | success=${result.success}`,
     ...(result.origin ? [`Batch: ${safeText(result.origin.batchID)}`] : []),
     `Agent: ${agentLabel(result.trial.agent)}`,
     `Session: ${safeText(result.sessionID ?? "unknown")} | ${result.durationMs} ms`,
     `Route: ${result.trial.technique} | Code Mode: ${result.codeMode}`,
+    `Route verified: ${grading === null ? "unknown" : grading.routeValid ? "yes" : "no"}`,
+    `Schema compliant: ${grading === null ? "unknown" : grading.schemaValid ? "yes" : "no"}`,
+    `Values accurate: ${grading?.valueMatches === null || grading === null ? "unknown" : grading.valueMatches ? "yes" : "no"}`,
     ...(result.session
       ? [
           "Configuration:",
@@ -188,6 +256,11 @@ function details(result: Result): string[] {
           `  Work directory: ${safeText(result.session.workDirectory)}`,
         ]
       : []),
+    ...(inspection.command
+      ? ["Inspect in agent:", `  ${safeText(inspection.command)}`]
+      : [
+          `Inspect in agent: unavailable (${safeText(inspection.unavailable ?? "unknown reason")})`,
+        ]),
     `Telemetry: ${validSample(result) ? "valid summary sample" : "excluded from summary"}`,
     ...metrics.map(
       ({ key, label }) =>
@@ -267,6 +340,9 @@ export function csvReport(batch: Batch): string {
     "trial_id",
     "status",
     "success",
+    "route_valid",
+    "schema_valid",
+    "value_matches",
     "tried",
     "valid_samples",
     "pending",
@@ -296,6 +372,9 @@ export function csvReport(batch: Batch): string {
       null,
       statuses(row),
       row.success,
+      null,
+      null,
+      null,
       row.tried,
       row.validSamples,
       row.pending,
@@ -325,6 +404,9 @@ export function csvReport(batch: Batch): string {
         result.trial.id,
         result.status,
         result.success,
+        result.grading?.routeValid ?? null,
+        result.grading?.schemaValid ?? null,
+        result.grading?.valueMatches ?? null,
         1,
         validSample(result) ? 1 : 0,
         null,
@@ -610,12 +692,12 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     size.height -
       (detail ? 2 : 3) -
       chartLegend.length -
-      batchLegend.length -
-      batchPageSize * batchRowLines -
+      (detail ? 0 : batchLegend.length) -
+      (detail ? 0 : batchPageSize * batchRowLines) -
       7 -
-      batchRowLines -
+      (detail ? 0 : batchRowLines) -
       (detail ? 0 : 1) -
-      (notice ? 1 : 0),
+      (!detail && notice ? 1 : 0),
   );
   const groups = techniques
     .map((technique) => rows.filter((item) => item.technique === technique))
@@ -652,7 +734,9 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     `${item.success}/${item.tried} success · ${item.validSamples} valid · ${item.pending} pending`;
   const chartValue = (item: SummaryRow) => {
     const stat = item.metrics[metric];
-    return stat.n === 0 && item.tried === 0 && item.pending > 0 ? "pending" : formatted(stat.median);
+    return stat.n === 0 && item.tried === 0 && item.pending > 0
+      ? "pending"
+      : formatted(stat.median);
   };
   const valueWidth = Math.max(
     7,
@@ -675,14 +759,14 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       exit();
       return;
     }
-    if (input === "j" || input === "k") {
+    if (!detail && (input === "j" || input === "k")) {
       setBatchCursor((cursor) =>
         Math.max(0, Math.min(available.length - 1, cursor + (input === "j" ? 1 : -1))),
       );
       setNotice("");
       return;
     }
-    if (input === " ") {
+    if (!detail && input === " ") {
       const candidate = available[batchCursor];
       if (!candidate) return;
       const next = new Set(batchIDs);
@@ -701,7 +785,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       setNotice("");
       return;
     }
-    if (["1", "2", "3", "4"].includes(input)) {
+    if (!detail && ["1", "2", "3", "4"].includes(input)) {
       const nextBenchmark: Benchmark = Number(input) <= 2 ? "github" : "suite";
       const nextWorkload = Number(input) % 2 === 1 ? "task" : "noop";
       const nextAvailable = allBatches.filter(
@@ -716,8 +800,8 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       setScroll(0);
       setDetail(false);
     }
-    if (input === "i") setMetric("initialInput");
-    if (input === "t") setMetric("totalTokens");
+    if (!detail && input === "i") setMetric("initialInput");
+    if (!detail && input === "t") setMetric("totalTokens");
     if (key.return || key.escape) {
       setDetail(key.escape ? false : !detail);
       setScroll(0);
@@ -857,54 +941,56 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
       {chartLegend.map((line, index) => (
         <Text key={index}>{line}</Text>
       ))}
-      <Box marginTop={1} flexDirection="column">
-        <Panel title={`batches · ${selectedBatches.length} selected`} width={width}>
-          {bands.map((band, index) => (
-            <Text key={index} bold {...inkColor(palette.key)} wrap="truncate-end">
-              {"      "}
-              {gridLine(band)}
-            </Text>
+      {!detail && (
+        <Box marginTop={1} flexDirection="column">
+          <Panel title={`batches · ${selectedBatches.length} selected`} width={width}>
+            {bands.map((band, index) => (
+              <Text key={index} bold {...inkColor(palette.key)} wrap="truncate-end">
+                {"      "}
+                {gridLine(band)}
+              </Text>
+            ))}
+            <Text {...inkColor(palette.border)}>{"─".repeat(width - 4)}</Text>
+            {available.slice(batchTop, batchTop + batchPageSize).map((item, index) => {
+              const checked = batchIDs.has(item.manifest.id);
+              const focused = batchTop + index === batchCursor;
+              const fields = batchRows[batchTop + index];
+              return (
+                <Box key={item.manifest.id} flexDirection="column">
+                  {bands.map((band, bandIndex) => (
+                    <Text
+                      key={bandIndex}
+                      bold={focused}
+                      {...inkColor(focused ? palette.white : palette.muted)}
+                      wrap="truncate-end"
+                    >
+                      {bandIndex === 0 ? (
+                        <>
+                          {focused ? "▸" : " "}{" "}
+                          <Text {...inkColor(checked ? palette.teal : palette.muted)}>
+                            [{checked ? "✓" : " "}]
+                          </Text>{" "}
+                        </>
+                      ) : (
+                        "      "
+                      )}
+                      {gridLine(band, fields)}
+                    </Text>
+                  ))}
+                </Box>
+              );
+            })}
+            {notice && (
+              <Text {...inkColor(palette.amber)} wrap="truncate-end">
+                {notice}
+              </Text>
+            )}
+          </Panel>
+          {batchLegend.map((line, index) => (
+            <Text key={index}>{line}</Text>
           ))}
-          <Text {...inkColor(palette.border)}>{"─".repeat(width - 4)}</Text>
-          {available.slice(batchTop, batchTop + batchPageSize).map((item, index) => {
-            const checked = batchIDs.has(item.manifest.id);
-            const focused = batchTop + index === batchCursor;
-            const fields = batchRows[batchTop + index];
-            return (
-              <Box key={item.manifest.id} flexDirection="column">
-                {bands.map((band, bandIndex) => (
-                  <Text
-                    key={bandIndex}
-                    bold={focused}
-                    {...inkColor(focused ? palette.white : palette.muted)}
-                    wrap="truncate-end"
-                  >
-                    {bandIndex === 0 ? (
-                      <>
-                        {focused ? "▸" : " "}{" "}
-                        <Text {...inkColor(checked ? palette.teal : palette.muted)}>
-                          [{checked ? "✓" : " "}]
-                        </Text>{" "}
-                      </>
-                    ) : (
-                      "      "
-                    )}
-                    {gridLine(band, fields)}
-                  </Text>
-                ))}
-              </Box>
-            );
-          })}
-          {notice && (
-            <Text {...inkColor(palette.amber)} wrap="truncate-end">
-              {notice}
-            </Text>
-          )}
-        </Panel>
-        {batchLegend.map((line, index) => (
-          <Text key={index}>{line}</Text>
-        ))}
-      </Box>
+        </Box>
+      )}
     </Box>
   );
 }
