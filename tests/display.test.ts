@@ -382,10 +382,15 @@ describe("summarize", () => {
     });
     expect(input).toEqual(before);
   });
-  it("counts successes independently of telemetry and excludes unsuccessful or partial samples", () => {
+  it("counts successes independently and includes complete value failures in telemetry", () => {
     const rows = summarize(
       batch([
         result("good"),
+        result("value-failure", {
+          success: false,
+          grading: { routeValid: true, schemaValid: true, valueMatches: false },
+          metrics: usage({ totalTokens: 900 }),
+        }),
         result("partial", { status: "usage-incomplete", metrics: usage({ complete: false }) }),
         result("missing", { metrics: null }),
         result("failed", {
@@ -397,14 +402,14 @@ describe("summarize", () => {
       ]),
     );
     expect(rows[0]).toMatchObject({
-      tried: 5,
+      tried: 6,
       success: 3,
-      validSamples: 1,
-      statuses: { complete: 2, "usage-incomplete": 1, failed: 1, running: 1 },
+      validSamples: 2,
+      statuses: { complete: 3, "usage-incomplete": 1, failed: 1, running: 1 },
       metrics: {
-        totalTokens: { n: 1, total: 330 },
-        totalInput: { total: 300 },
-        cacheRead: { total: 200 },
+        totalTokens: { n: 2, total: 1230 },
+        totalInput: { total: 600 },
+        cacheRead: { total: 400 },
       },
     });
   });

@@ -68,7 +68,6 @@ export function statistics(values: readonly (number | null)[]): Statistics {
 function validSample(result: Result): boolean {
   const usage = result.metrics;
   return (
-    result.success &&
     result.status === "complete" &&
     usage !== null &&
     usage.complete &&
