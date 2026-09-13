@@ -475,6 +475,11 @@ export class ClaudeCollector {
           requests[0]?.usage.input_tokens === undefined
             ? null
             : totals(requests[0].usage).totalInput,
+        finalContext:
+          requests.at(-1)?.usage.input_tokens === undefined ||
+          requests.at(-1)?.usage.output_tokens === undefined
+            ? null
+            : totals(requests.at(-1)?.usage ?? {}).totalTokens,
         reasoning: 0,
         steps: requests.length,
         complete: !this.incomplete && !this.events.malformed,

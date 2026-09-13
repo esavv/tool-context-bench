@@ -351,6 +351,7 @@ it("normalizes shell events and reads only the SQLite-selected thread, deduplica
   const usage = await prepared.collect();
   expect(usage.metrics).toEqual({
     initialInput: 100,
+    finalContext: 60,
     totalInput: 150,
     totalOutput: 30,
     totalTokens: 180,

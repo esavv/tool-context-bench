@@ -383,7 +383,10 @@ describe("view batch loading", () => {
     );
     const before = await readFile(join(directory, "0.result.json"), "utf8");
     const loaded = await loadBatch(paths, "claude-usage-batch");
-    expect(loaded.results[0]).toMatchObject({ status: "complete", metrics: { complete: true } });
+    expect(loaded.results[0]).toMatchObject({
+      status: "complete",
+      metrics: { complete: true, finalContext: 37 },
+    });
     expect(await readFile(join(directory, "0.result.json"), "utf8")).toBe(before);
   });
 
@@ -412,6 +415,7 @@ describe("view batch loading", () => {
       success: false,
       metrics: {
         initialInput: 1,
+        finalContext: 1,
         totalInput: 1,
         totalOutput: 1,
         totalTokens: 2,

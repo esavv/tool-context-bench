@@ -25,6 +25,53 @@ const claudeRequestUsageSchema = z.object({
   complete: z.literal(true),
 });
 
+function requestContext(agent: Result["trial"]["agent"], raw: unknown): number | null {
+  const request = z.record(z.string(), z.unknown()).safeParse(raw);
+  if (!request.success) return null;
+  const value = request.data;
+  if (agent === "opencode" && (value.kind !== "main" || value.finished !== true)) return null;
+  if (agent === "opencode2" && (value.agent !== "bench" || value.finished !== true)) return null;
+  const direct = z
+    .number()
+    .int()
+    .nonnegative()
+    .safeParse(value.totalTokens ?? value.total);
+  if (direct.success) return direct.data;
+  const usage = z.record(z.string(), z.unknown()).safeParse(value.usage);
+  if (usage.success) {
+    const total = z.number().int().nonnegative().safeParse(usage.data.total_tokens);
+    if (total.success) return total.data;
+  }
+  const input = z
+    .number()
+    .int()
+    .nonnegative()
+    .safeParse(value.totalInput ?? value.input);
+  const output = z
+    .number()
+    .int()
+    .nonnegative()
+    .safeParse(value.totalOutput ?? value.output);
+  return input.success && output.success ? input.data + output.data : null;
+}
+
+async function recoverFinalContext(directory: string, result: Result): Promise<void> {
+  if (result.metrics === null || result.metrics.finalContext !== null) return;
+  try {
+    const raw: unknown = JSON.parse(
+      await readFile(join(directory, `${basename(result.trial.id)}.requests.json`), "utf8"),
+    );
+    const requests = z.array(z.unknown()).parse(raw);
+    result.metrics.finalContext =
+      requests
+        .map((request) => requestContext(result.trial.agent, request))
+        .filter((value): value is number => value !== null)
+        .at(-1) ?? null;
+  } catch {
+    // Removed or partial sidecars leave this display-only metric unavailable.
+  }
+}
+
 async function recoverClaudeUsage(directory: string, result: Result): Promise<void> {
   if (result.trial.agent !== "claude" || result.metrics === null || result.metrics.complete) return;
   try {
@@ -211,6 +258,7 @@ export async function loadBatch(paths: Paths, id: string): Promise<Batch> {
     }
     const result = resultSchema.parse(data);
     await recoverClaudeUsage(directory, result);
+    await recoverFinalContext(directory, result);
     if (!result.session) {
       const attemptDirectory = join(paths.attempts, `${selected}_${basename(result.trial.id)}`);
       let configuration: unknown;

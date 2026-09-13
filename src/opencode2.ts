@@ -257,6 +257,7 @@ export async function opencode2Auth(databasePath: string): Promise<void> {
 export function parseOpencode2Usage(rows: unknown[], sessionID: string): AgentUsage {
   const metrics: Metrics = {
     initialInput: null,
+    finalContext: null,
     totalInput: 0,
     totalOutput: 0,
     totalTokens: 0,
@@ -407,6 +408,7 @@ export function parseOpencode2Usage(rows: unknown[], sessionID: string): AgentUs
     metrics.totalInput +=
       (tokens.input ?? 0) + (tokens.cache.read ?? 0) + (tokens.cache.write ?? 0);
     metrics.totalOutput += (tokens.output ?? 0) + (tokens.reasoning ?? 0);
+    metrics.finalContext = request.total;
   }
   metrics.totalTokens = metrics.totalInput + metrics.totalOutput;
   if (pending.size) warn("Unsettled step starts have unknown usage.");

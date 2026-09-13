@@ -465,6 +465,7 @@ export async function prepareCodex(
     async collect(): Promise<AgentUsage> {
       const metrics: Metrics = {
         initialInput: null,
+        finalContext: null,
         totalInput: 0,
         totalOutput: 0,
         totalTokens: 0,
@@ -672,6 +673,7 @@ export async function prepareCodex(
         );
         metrics.reasoning = total.reasoning_output_tokens;
         metrics.steps = requests.length;
+        metrics.finalContext = requests.at(-1)?.usage.total_tokens ?? null;
         if (cumulative && !equal(total, cumulative))
           incomplete("Codex rollout cumulative usage does not reconcile with response deltas.");
         // In 0.153.3, turn.completed exports the thread total, not a new usage delta.
