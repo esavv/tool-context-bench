@@ -437,10 +437,10 @@ const palette = {
   track: "#343c38",
   teal: "#74d7c4",
   claude: "#d97757",
-  codex: "#76c66b",
-  opencode: "#c49aef",
+  codex: "#dabe73",
+  opencode: "#76c66b",
   opencode2: "#73a7ef",
-  pi: "#d4a85f",
+  pi: "#c49aef",
   key: "#dabe73",
   amber: "#dabe73",
   white: "#e2e9df",
@@ -781,7 +781,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     ...rows.map((item) => chartValue(item, "totalTokens").length),
   );
   const contextWidth = Math.max(
-    "% context".length,
+    "context %".length,
     ...rows.flatMap((item) => [
       contextPercentage(item.metrics.initialInput.median, item.agent).length,
       contextPercentage(item.metrics.finalContext.median, item.agent).length,
@@ -801,7 +801,7 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
         contextWidth * 2 -
         stepsWidth -
         countWidth -
-        10) /
+        11) /
         2,
     ),
   );
@@ -935,39 +935,49 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                 initial input + cache tokens
               </Text>
             </Box>
-            <Box width={contextWidth + 2} justifyContent="flex-end">
-              <Text bold {...inkColor(palette.white)}>
-                % context
-              </Text>
-            </Box>
+            <Box width={contextWidth + 2} />
             <Box width={2} />
             <Box width={barWidth + totalValueWidth + 1} justifyContent="center">
               <Text bold {...inkColor(palette.white)} wrap="truncate-end">
                 total session tokens
               </Text>
             </Box>
-            <Box width={stepsWidth + 1} justifyContent="flex-end">
-              <Text bold {...inkColor(palette.white)}>
-                steps
-              </Text>
-            </Box>
-            <Box width={contextWidth + 2} justifyContent="flex-end">
-              <Text bold {...inkColor(palette.white)}>
-                % context
-              </Text>
-            </Box>
-            <Box width={countWidth + 1} justifyContent="flex-end">
-              <Text bold {...inkColor(palette.white)}>
-                x/y success
-              </Text>
-            </Box>
+            <Box width={stepsWidth + contextWidth + countWidth + 6} />
           </Box>
           <Text> </Text>
-          {visibleGroups.map((group) => (
+          {visibleGroups.map((group, groupIndex) => (
             <Box key={group[0]?.technique} flexDirection="column">
-              <Text bold {...inkColor(palette.white)}>
-                {group[0] ? techniqueLabel(group[0].technique) : ""}
-              </Text>
+              {groupIndex === 0 ? (
+                <Box>
+                  <Box width={agentWidth + 3}>
+                    <Text bold {...inkColor(palette.white)}>
+                      {group[0] ? techniqueLabel(group[0].technique) : ""}
+                    </Text>
+                  </Box>
+                  <Box width={barWidth + initialValueWidth + 1} />
+                  <Box width={contextWidth + 2} justifyContent="flex-end">
+                    <Text bold {...inkColor(palette.white)}>
+                      context %
+                    </Text>
+                  </Box>
+                  <Box width={2} />
+                  <Box width={barWidth + totalValueWidth + 1} />
+                  <Box width={stepsWidth + 1} justifyContent="flex-end">
+                    <Text bold {...inkColor(palette.white)}>
+                      steps
+                    </Text>
+                  </Box>
+                  <Box width={contextWidth + 2} justifyContent="flex-end">
+                    <Text bold {...inkColor(palette.white)}>
+                      context %
+                    </Text>
+                  </Box>
+                </Box>
+              ) : (
+                <Text bold {...inkColor(palette.white)}>
+                  {group[0] ? techniqueLabel(group[0].technique) : ""}
+                </Text>
+              )}
               {group.map((item) => {
                 const initial = item.metrics.initialInput;
                 const total = item.metrics.totalTokens;
@@ -1009,7 +1019,8 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                       {contextPercentage(item.metrics.finalContext.median, item.agent).padStart(
                         contextWidth,
                       )}
-                    </Text>{" "}
+                    </Text>
+                    {"  "}
                     <Text
                       {...inkColor(item.validSamples < item.tried ? palette.amber : palette.muted)}
                     >
