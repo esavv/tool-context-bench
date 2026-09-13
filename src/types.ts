@@ -38,7 +38,6 @@ export type SuiteExpected = z.infer<typeof suiteExpectedSchema>;
 
 export const metricSchema = z.object({
   initialInput: z.number().nullable(),
-  finalContext: z.number().nullable().default(null),
   totalInput: z.number(),
   totalOutput: z.number(),
   totalTokens: z.number(),

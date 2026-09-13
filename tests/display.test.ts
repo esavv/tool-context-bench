@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  contextPercentage,
   csvReport,
   sessionInspection,
   statistics,
@@ -32,7 +31,6 @@ function result(id: string, overrides: Partial<Result> = {}): Result {
 function usage(overrides: Partial<Metrics> = {}): Metrics {
   return {
     initialInput: 100,
-    finalContext: 220,
     totalInput: 300,
     totalOutput: 30,
     totalTokens: 330,
@@ -118,11 +116,6 @@ function parseCsv(csv: string): Record<string, string>[] {
 }
 
 describe("statistics", () => {
-  it("uses the fixed Sonnet and Terra context windows", () => {
-    expect(contextPercentage(10_000, "claude")).toBe("1.0%");
-    expect(contextPercentage(10_500, "codex")).toBe("1.0%");
-    expect(contextPercentage(null, "pi")).toBe("unknown");
-  });
   it("uses the lowercase Executor technique label", () => {
     expect(techniqueLabel("executor")).toBe("executor");
   });

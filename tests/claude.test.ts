@@ -225,7 +225,6 @@ it("counts stream snapshots once, keeps completed usage, and joins tool results 
   const usage = collector.collect();
   expect(usage.metrics).toEqual({
     initialInput: 35,
-    finalContext: 51,
     freshInput: 22,
     cacheRead: 50,
     cacheWrite: 5,

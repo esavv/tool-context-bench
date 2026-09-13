@@ -8,7 +8,6 @@ import { agentLabel, agentSchema } from "./agents.js";
 type Metric = Exclude<keyof Metrics, "complete">;
 const metrics: { key: Metric; label: string }[] = [
   { key: "initialInput", label: "Initial input + cache" },
-  { key: "finalContext", label: "Final context" },
   { key: "totalInput", label: "Session input (all requests)" },
   { key: "totalTokens", label: "Total session tokens" },
   { key: "cacheRead", label: "Cache read" },
@@ -79,7 +78,7 @@ function validSample(result: Result): boolean {
     metrics.every(({ key }) => {
       const value = usage[key];
       return (
-        ((key === "initialInput" || key === "finalContext") && value === null) ||
+        (key === "initialInput" && value === null) ||
         (value !== null && Number.isFinite(value) && value >= 0)
       );
     })
@@ -120,7 +119,6 @@ export function summarize(batch: Batch): SummaryRow[] {
           statuses,
           metrics: {
             initialInput: stat("initialInput"),
-            finalContext: stat("finalContext"),
             totalInput: stat("totalInput"),
             totalTokens: stat("totalTokens"),
             cacheRead: stat("cacheRead"),
@@ -468,23 +466,13 @@ const gradients = new Map<Trial["agent"], string[]>(
 );
 
 function inkColor(color: string) {
-  return process.env.NO_COLOR === undefined ? { color } : {};
+  return process.env.NO_COLOR === undefined
+    ? { color, backgroundColor: "#000000" }
+    : { backgroundColor: "#000000" };
 }
 
 function formatted(value: number | null): string {
   return value === null ? "unknown" : value.toLocaleString("en-US", { maximumFractionDigits: 1 });
-}
-
-const contextWindows: Record<Trial["agent"], number> = {
-  claude: 1_000_000,
-  codex: 1_050_000,
-  opencode: 1_050_000,
-  opencode2: 1_050_000,
-  pi: 1_050_000,
-};
-
-export function contextPercentage(value: number | null, agent: Trial["agent"]): string {
-  return value === null ? "unknown" : `${((value / contextWindows[agent]) * 100).toFixed(1)}%`;
 }
 
 function Panel({ title, width, children }: { title: string; width: number; children: ReactNode }) {
@@ -780,13 +768,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
     7,
     ...rows.map((item) => chartValue(item, "totalTokens").length),
   );
-  const contextWidth = Math.max(
-    "context %".length,
-    ...rows.flatMap((item) => [
-      contextPercentage(item.metrics.initialInput.median, item.agent).length,
-      contextPercentage(item.metrics.finalContext.median, item.agent).length,
-    ]),
-  );
   const stepsWidth = Math.max(5, ...rows.map((item) => chartValue(item, "steps").length));
   const countWidth = Math.max(0, ...rows.map((item) => barCounts(item).length));
   const agentWidth = Math.max(...agentSchema.options.map((agent) => agentLabel(agent).length));
@@ -798,10 +779,9 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
         (agentWidth + 3) -
         initialValueWidth -
         totalValueWidth -
-        contextWidth * 2 -
         stepsWidth -
         countWidth -
-        11) /
+        7) /
         2,
     ),
   );
@@ -935,14 +915,13 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                 initial input + cache tokens
               </Text>
             </Box>
-            <Box width={contextWidth + 2} />
             <Box width={2} />
             <Box width={barWidth + totalValueWidth + 1} justifyContent="center">
               <Text bold {...inkColor(palette.white)} wrap="truncate-end">
                 total session tokens
               </Text>
             </Box>
-            <Box width={stepsWidth + contextWidth + countWidth + 6} />
+            <Box width={stepsWidth + countWidth + 3} />
           </Box>
           <Text> </Text>
           {visibleGroups.map((group, groupIndex) => (
@@ -955,21 +934,11 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                     </Text>
                   </Box>
                   <Box width={barWidth + initialValueWidth + 1} />
-                  <Box width={contextWidth + 2} justifyContent="flex-end">
-                    <Text bold {...inkColor(palette.white)}>
-                      context %
-                    </Text>
-                  </Box>
                   <Box width={2} />
                   <Box width={barWidth + totalValueWidth + 1} />
                   <Box width={stepsWidth + 1} justifyContent="flex-end">
                     <Text bold {...inkColor(palette.white)}>
                       steps
-                    </Text>
-                  </Box>
-                  <Box width={contextWidth + 2} justifyContent="flex-end">
-                    <Text bold {...inkColor(palette.white)}>
-                      context %
                     </Text>
                   </Box>
                 </Box>
@@ -996,10 +965,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                       {chartValue(item, "initialInput").padStart(initialValueWidth)}
                     </Text>
                     {"  "}
-                    <Text {...inkColor(initial.n ? palette.muted : palette.amber)}>
-                      {contextPercentage(initial.median, item.agent).padStart(contextWidth)}
-                    </Text>
-                    {"  "}
                     <Meter
                       agent={item.agent}
                       value={total.median}
@@ -1011,14 +976,6 @@ function App({ batch: initialBatch, history }: { batch: Batch; history: BatchHis
                     </Text>{" "}
                     <Text {...inkColor(item.metrics.steps.n ? palette.muted : palette.amber)}>
                       {chartValue(item, "steps").padStart(stepsWidth)}
-                    </Text>
-                    {"  "}
-                    <Text
-                      {...inkColor(item.metrics.finalContext.n ? palette.muted : palette.amber)}
-                    >
-                      {contextPercentage(item.metrics.finalContext.median, item.agent).padStart(
-                        contextWidth,
-                      )}
                     </Text>
                     {"  "}
                     <Text
@@ -1127,7 +1084,7 @@ export async function renderReport(
     });
     return;
   }
-  process.stdout.write("\u001b[?1049h\u001b[40m\u001b[2J\u001b[H");
+  process.stdout.write("\u001b[?1049h\u001b]11;#000000\u0007\u001b[48;2;0;0;0m\u001b[2J\u001b[H");
   const instance = render(<App batch={batch} history={history} />, {
     exitOnCtrlC: false,
     patchConsole: false,
@@ -1137,6 +1094,6 @@ export async function renderReport(
   } finally {
     instance.unmount();
     instance.cleanup();
-    process.stdout.write("\u001b[0m\u001b[?1049l");
+    process.stdout.write("\u001b[0m\u001b]111\u0007\u001b[?1049l");
   }
 }

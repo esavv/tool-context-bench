@@ -43,7 +43,6 @@ describe("parseUsage", () => {
     const report = parseUsage(fixture(), "s");
     expect(report.metrics).toEqual({
       initialInput: 160,
-      finalContext: 185,
       totalInput: 160,
       totalOutput: 25,
       totalTokens: 185,

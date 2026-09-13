@@ -96,7 +96,6 @@ export function parseUsage(snapshot: unknown, sessionID: string): UsageReport {
   if (!parsed.success) throw new Error("OpenCode usage data is unavailable.");
   const metrics: Metrics = {
     initialInput: null,
-    finalContext: null,
     totalInput: 0,
     totalOutput: 0,
     totalTokens: 0,
@@ -324,8 +323,6 @@ export function parseUsage(snapshot: unknown, sessionID: string): UsageReport {
   const main = requests.filter((request) => request.kind === "main");
   const first = main[0];
   if (!uncertainOrder && first?.matchedStart) metrics.initialInput = first.input;
-  const last = main.at(-1);
-  if (!uncertainOrder && last?.finished) metrics.finalContext = sum([last.input, last.output]);
   if (main.length === 0) warn("No main step usage found.");
   for (const request of main) {
     if (!request.finished) continue;

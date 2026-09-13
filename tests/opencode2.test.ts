@@ -145,7 +145,6 @@ it("accounts native persisted categories once and uses the observed model", () =
   const usage = parseOpencode2Usage([start, finish, finish, success], sessionID);
   expect(usage.metrics).toEqual({
     initialInput: 150,
-    finalContext: 175,
     totalInput: 150,
     totalOutput: 25,
     totalTokens: 175,

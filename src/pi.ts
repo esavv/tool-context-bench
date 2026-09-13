@@ -139,7 +139,6 @@ export async function preparePi(
         initialInput: requests[0]
           ? requests[0].input + requests[0].cacheRead + requests[0].cacheWrite
           : null,
-        finalContext: requests.at(-1)?.totalTokens ?? null,
         totalInput: requests.reduce(
           (sum, request) => sum + request.input + request.cacheRead + request.cacheWrite,
           0,
