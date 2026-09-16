@@ -4,6 +4,14 @@ Measure token usage of agent tool calls across bash, MCP, tool search, and code 
 
 ## Screenshots
 
+#### Token usage for a single GitHub task
+
+<img width="1286" height="496" alt="Screenshot-2026-09-13-6 00 23-PM" src="https://github.com/user-attachments/assets/ab35a9e4-d8ea-4698-af1c-a2ca551cc748" />
+
+#### Token usage for a multi-tool task, using GitHub, Cloudflare, Stripe, and Supabase
+
+<img width="1284" height="462" alt="Screenshot-2026-09-13-6 00 00-PM" src="https://github.com/user-attachments/assets/b7a117c4-cd42-484f-8acb-88fd2ec62d57" />
+
 ## Usage
 
 Install dependencies, build the CLI, and link `tcb`:
